@@ -1,7 +1,7 @@
 # Customs Crepe
 ## Author Jacob Westman
 
-This repo contains code to extract information from access-to-market
+This repo contains code to extract information from access-to-market. It's crepe cause everyone loves pancakes.
 
 ## Intall
 Download the repo or clone using:
