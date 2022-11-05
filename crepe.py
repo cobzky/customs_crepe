@@ -51,10 +51,11 @@ class TariffData:
     
     """
 
-    def __init__(self,product_list = None,country_of_origin = None,country_of_destination = None):
-        self.product_list = product_list
+    def __init__(self,product_list = None,country_of_origin = None,country_of_destination = None,output_type = "sql"):
+        self.product_list = [str(x)  for x in product_list]
         self.country_of_origin = country_of_origin
         self.country_of_destination = country_of_destination
+        self.output_type = output_type
 
     
 
@@ -106,10 +107,59 @@ class TariffData:
 
         final_df = pd.concat(dfs)
 
+        #self.export_results(final_df)
+
         return final_df
 
+    def export_results(self,df):
+        """"
+        
+        To do: fix so that only alowed types are in df
+
+        """
+        if self.output_type == "csv":
+            df.to_csv("tariff_data.csv")
+            return 0
+
+        if self.output_type == "sql":
+            con = sqlite3.connect("CustomsDatabase")
+            cur = con.cursor()
+            df.to_sql("tariff_data",con,if_exists = "replace",index = False)
 
 
+
+
+class ImportFile:
+    def __init__(self,filename):
+        self.filename = filename
+        self.filetype = None
+    
+    def load_file(self):
+        if self.filename[-4:] == "xlsx":
+            try:
+                self.input_file = pd.read_excel(self.filename)
+                self.filetype = "xlsx"
+                return 0
+
+            except Exception as e:
+                print(e)
+                
+
+        if self.filename[-3:] == "csv":
+            try:
+                self.input_file = pd.read_csv(self.filename,dtype = str)
+                self.filetype = "csv"
+                return 0
+
+            except Exception as e:
+                print(e)
+
+
+        print("No extension detected, please specify valid type (.xlsx,.csv)")
+    
+    def extract_values(self):
+        if self.filetype == "csv":
+            return self.input_file
 
 
 
@@ -158,13 +208,13 @@ def main():
 
 
     product_list = ['010121','01012910','01012990','010130']
-    country_of_origins = ["US","CA","NO","DE"]
+    country_of_origins = ["US","CA","NO","CN","CH"]
     country_of_destination = "SE"
     
     td = TariffData(product_list,country_of_origins,country_of_destination)
 
-    #result = td.get_data()
-    #print(result)
+    result = td.get_data()
+    print(result)
 
 if __name__ == "__main__":
     main()

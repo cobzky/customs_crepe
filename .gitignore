@@ -1,1 +1,3 @@
 CustomsDatabase
+*.csv
+__pycache__/
