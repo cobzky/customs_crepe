@@ -3,6 +3,7 @@ import pandas as pd
 import sys
 from tqdm import tqdm
 import sqlite3
+from time import sleep
 
 class CountryData:
     """
@@ -77,8 +78,9 @@ class TariffData:
         except Exception as e:
             pass
 
-    def get_data(self):
+    def get_data(self,get_recursive = True):
         dfs = []
+        exeptions = 0
         if self.product_list == None:
             print("You need to provide some products")
             return 0
@@ -91,21 +93,48 @@ class TariffData:
             print("You need to provide some destination country")
             return 0
 
-        for product in tqdm(self.product_list):
-            for og_country in self.country_of_origin:
-                url = self.get_url(product,og_country,self.country_of_destination)
-                json_obj = self.get_json(url)
+        if get_recursive:
+
+            for product in tqdm(self.product_list):
+                for og_country in self.country_of_origin:
+                    url = self.get_url(product,og_country,self.country_of_destination)
+                    json_obj = self.get_json(url)
+                    try:
+                        df = self.get_response_df(json_obj)
+                        df.loc[:,"product_id"] = product
+                        df.loc[:,"country_of_origin"] = og_country
+
+                    except Exception as e:
+                        pass
+
+                    dfs.append(df)
+
+        else:
+            
+            assert len(self.product_list) == len(self.country_of_origin)
+            for i in tqdm(range(len(self.product_list))):
+                og_country = self.country_of_origin[i]
+                product = self.product_list[i]
+
+
+                
                 try:
+                    url = self.get_url(product,og_country,self.country_of_destination)
+                    json_obj = self.get_json(url)
                     df = self.get_response_df(json_obj)
                     df.loc[:,"product_id"] = product
                     df.loc[:,"country_of_origin"] = og_country
-
+                    dfs.append(df)
                 except Exception as e:
-                    pass
+                        exeptions += 1
 
-                dfs.append(df)
+                
+                sleep(1)
+
+        print("Number of exceptions thrown = {}".format(exeptions))
 
         final_df = pd.concat(dfs)
+        final_df = final_df.loc[:,["origin","type","startDate","endDate","exclusions","tariffFormula","product_id","country_of_origin"]]
 
         #self.export_results(final_df)
 
@@ -138,6 +167,8 @@ class ImportFile:
         if self.filename[-4:] == "xlsx":
             try:
                 self.input_file = pd.read_excel(self.filename)
+                self.input_file.columns = self.input_file.iloc[6,:].values
+                self.input_file = self.input_file.iloc[7:,:].reset_index(drop = True)
                 self.filetype = "xlsx"
                 return 0
 
@@ -196,8 +227,50 @@ class ProductData:
 
 
 
+def get_tariffs(df1):
+    
+    df1.loc[:,"Varukod"] = [x.replace(" ","") for x in df1.Varukod]
+
+    df1.loc[:,"merge_id"] = df1.Varukod + df1.Ursprungsland
+    print(df1)
+
+    df = df1.loc[:,["Varukod","Ursprungsland"]].drop_duplicates()
+    products = [x.replace(" ","") for x in list(df.Varukod.values)]
+    og_countries = list(df.Ursprungsland.values)
+
+    print(products)
+    print(og_countries)
+
+    td = TariffData(products,og_countries,"SE")
+    result = td.get_data(get_recursive = False)
+
+    result.to_csv("data/mid_result.csv")
 
     
+
+    result.loc[:,"merge_id"] = result.product_id + result.country_of_origin
+    result = result.loc[:,result.type == "Thrid country duty"]
+
+    result.loc[:,"tariffFormula"] = [float(x.replace("%",""))/100 for x in result.tariffFormula]
+    
+
+
+    new_res = df1.loc[df1.Förmånskod == "300",:].merge(result, how = "left",on = ["merge_id","merge_id"])
+
+    new_res.loc[:,"Statistiskt värde"] = pd.to_numeric(new_res.loc[:,"Statistiskt värde"])
+    new_res.loc[:,"tariff_saving"] = new_res.loc[:,"Statistiskt värde"]*new_res.tariffFormula
+
+    new_res.to_csv("data/test_result.csv")
+    new_res.to_excel("data/test_result.xlsx")
+
+    print(new_res)
+
+
+
+
+
+
+
 
 def main():
     cd = CountryData(output_type = "sql")
@@ -211,10 +284,18 @@ def main():
     country_of_origins = ["US","CA","NO","CN","CH"]
     country_of_destination = "SE"
     
-    td = TariffData(product_list,country_of_origins,country_of_destination)
+    #td = TariffData(product_list,country_of_origins,country_of_destination)
 
-    result = td.get_data()
-    print(result)
+    #result = td.get_data()
+    #print(result.columns)
+    #print(result)
+    
+    imp = ImportFile("data/statistik_import.xlsx")
+    imp.load_file()
+    test_file = imp.input_file
+    get_tariffs(test_file)
+
+
 
 if __name__ == "__main__":
     main()

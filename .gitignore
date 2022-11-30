@@ -1,3 +1,4 @@
 CustomsDatabase
 *.csv
 __pycache__/
+*.xlsx
