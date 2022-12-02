@@ -28,6 +28,7 @@ class CountryData:
         result = requests.get(country_url).json()
 
         df = pd.DataFrame(result)
+        self.country_data = df
 
         self.export_results(df)
 
@@ -129,7 +130,7 @@ class TariffData:
                         exeptions += 1
 
                 
-                sleep(1)
+                sleep(2)
 
         print("Number of exceptions thrown = {}".format(exeptions))
 
@@ -249,7 +250,7 @@ def get_tariffs(df1):
     
 
     result.loc[:,"merge_id"] = result.product_id + result.country_of_origin
-    result = result.loc[:,result.type == "Thrid country duty"]
+    result = result.loc[:,result.loc[:,"type"] == "Thrid country duty"]
 
     result.loc[:,"tariffFormula"] = [float(x.replace("%",""))/100 for x in result.tariffFormula]
     
@@ -266,6 +267,46 @@ def get_tariffs(df1):
     print(new_res)
 
 
+def convert_result(result,df1,fta,eu_countries):
+    df1.loc[:,"Varukod"] = [x.replace(" ","") for x in df1.Varukod]
+
+    df1.loc[:,"merge_id"] = df1.Varukod + df1.Ursprungsland
+
+    result.loc[:,"merge_id"] = result.product_id.astype(str) + result.country_of_origin
+    third_result = result.loc[result.loc[:,"type"] == "Third country duty",:]
+    auto_result = result.loc[(result.loc[:,"type"] == "Autonomous tariff suspension"),:]
+
+    third_result.loc[:,"tariffFormula"] = [float(x.replace("%",""))/100 for x in third_result.tariffFormula]
+    auto_result.loc[:,"tariffFormula_auto"] = [float(x.replace("%",""))/100 for x in auto_result.tariffFormula]
+    auto_result.loc[:,"tariffFormula_auto"].fillna(0)
+
+
+    new_res = df1.loc[df1.Förmånskod == "300",:].merge(third_result, how = "left",on = ["merge_id","merge_id"])
+
+    new_res.loc[:,"Statistiskt värde"] = pd.to_numeric(new_res.loc[:,"Statistiskt värde"])
+    new_res.loc[:,"tariff_saving_300"] = new_res.loc[:,"Statistiskt värde"]*new_res.tariffFormula
+
+    #new_res.to_csv("data/test_result.csv")
+    #new_res.to_excel("data/test_result.xlsx")
+
+    df2 = df1.loc[(df1.loc[:,"Avgiftsslag"] == "Tull"),:]
+
+    res_2 = df2.loc[df2.Förmånskod == "110"].merge(third_result,how = "left",on = ["merge_id","merge_id"])
+    res_2 = res_2.merge(auto_result,how ="left",on = ["merge_id","merge_id"])
+    res_2.loc[:,"tariff_saving_110"] = res_2.loc[:,"Statistiskt värde"]*(res_2.tariffFormula_x - res_2.tariffFormula_auto)
+    print(res_2)
+    res_2.to_excel("data/test_result_110.xlsx")
+
+
+    df3 = df2.loc[(df2.loc[:,"Förmånskod"] != "300") & (df2.loc[:,"Avgift belopp"] > 5000) & (df2.Ursprungsland.isin(list(fta.country)) | df2.Ursprungsland.isin(list(eu_countries))),:]
+    df3.loc[:,"possible_fta_savings"] = True
+
+    df3.to_excel("data/possible_fta_savings.xlsx")
+    
+
+    print(df3)
+    return new_res
+
 
 
 
@@ -275,7 +316,12 @@ def get_tariffs(df1):
 def main():
     cd = CountryData(output_type = "sql")
     cd.grab_country_info()
-    print("Done")
+
+    print(cd.country_data)
+
+    eu_countries = cd.country_data.loc[cd.country_data.memberState == True,:].code.values
+
+    #print("Done")
 
 
 
@@ -293,7 +339,14 @@ def main():
     imp = ImportFile("data/statistik_import.xlsx")
     imp.load_file()
     test_file = imp.input_file
-    get_tariffs(test_file)
+    #get_tariffs(test_file)
+    fta = pd.read_csv("data/fta.txt")
+    print(fta)
+
+    df = pd.read_csv("data/mid_result.csv")
+
+    final_result = convert_result(df,test_file,fta,eu_countries)
+    print(final_result)
 
 
 
