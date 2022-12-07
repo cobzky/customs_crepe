@@ -4,6 +4,7 @@ import sys
 from tqdm import tqdm
 import sqlite3
 from time import sleep
+from random import random
 
 class CountryData:
     """
@@ -68,7 +69,8 @@ class TariffData:
         return url
 
     def get_json(self,url):
-        res = requests.get(url)
+        headers = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"}
+        res = requests.get(url,headers = headers)
         return res.json()
 
     
@@ -130,7 +132,7 @@ class TariffData:
                         exeptions += 1
 
                 
-                sleep(2)
+                sleep(1 + random())
 
         print("Number of exceptions thrown = {}".format(exeptions))
 
@@ -239,13 +241,13 @@ def get_tariffs(df1):
     products = [x.replace(" ","") for x in list(df.Varukod.values)]
     og_countries = list(df.Ursprungsland.values)
 
-    print(products)
-    print(og_countries)
 
     td = TariffData(products,og_countries,"SE")
     result = td.get_data(get_recursive = False)
 
-    result.to_csv("data/mid_result.csv")
+    result.to_csv("data/mid_result_2.csv")
+
+    return result
 
     
 
@@ -266,8 +268,14 @@ def get_tariffs(df1):
 
     print(new_res)
 
+def fix_values(x):
+    if "EUR" in x:
+        return "0"
+    else:
+        return x
 
-def convert_result(result,df1,fta,eu_countries):
+
+def convert_result(result,df1,fta,eu_countries,filename = "2"):
     df1.loc[:,"Varukod"] = [x.replace(" ","") for x in df1.Varukod]
 
     df1.loc[:,"merge_id"] = df1.Varukod + df1.Ursprungsland
@@ -275,6 +283,8 @@ def convert_result(result,df1,fta,eu_countries):
     result.loc[:,"merge_id"] = result.product_id.astype(str) + result.country_of_origin
     third_result = result.loc[result.loc[:,"type"] == "Third country duty",:]
     auto_result = result.loc[(result.loc[:,"type"] == "Autonomous tariff suspension"),:]
+
+    third_result.loc[:,"tariffFormula"] = third_result.loc[:,"tariffFormula"].apply(lambda x : fix_values(x))
 
     third_result.loc[:,"tariffFormula"] = [float(x.replace("%",""))/100 for x in third_result.tariffFormula]
     auto_result.loc[:,"tariffFormula_auto"] = [float(x.replace("%",""))/100 for x in auto_result.tariffFormula]
@@ -287,7 +297,7 @@ def convert_result(result,df1,fta,eu_countries):
     new_res.loc[:,"tariff_saving_300"] = new_res.loc[:,"Statistiskt värde"]*new_res.tariffFormula
 
     #new_res.to_csv("data/test_result.csv")
-    #new_res.to_excel("data/test_result.xlsx")
+    new_res.to_excel("data/result_300_{}.xlsx".format(filename))
 
     df2 = df1.loc[(df1.loc[:,"Avgiftsslag"] == "Tull"),:]
 
@@ -295,13 +305,13 @@ def convert_result(result,df1,fta,eu_countries):
     res_2 = res_2.merge(auto_result,how ="left",on = ["merge_id","merge_id"])
     res_2.loc[:,"tariff_saving_110"] = res_2.loc[:,"Statistiskt värde"]*(res_2.tariffFormula_x - res_2.tariffFormula_auto)
     print(res_2)
-    res_2.to_excel("data/test_result_110.xlsx")
+    res_2.to_excel("data/result_110_{}.xlsx".format(filename))
 
 
     df3 = df2.loc[(df2.loc[:,"Förmånskod"] != "300") & (df2.loc[:,"Avgift belopp"] > 5000) & (df2.Ursprungsland.isin(list(fta.country)) | df2.Ursprungsland.isin(list(eu_countries))),:]
     df3.loc[:,"possible_fta_savings"] = True
 
-    df3.to_excel("data/possible_fta_savings.xlsx")
+    df3.to_excel("data/possible_fta_savings_{}.xlsx".format(filename))
     
 
     print(df3)
@@ -314,6 +324,8 @@ def convert_result(result,df1,fta,eu_countries):
 
 
 def main():
+
+    file_suffix = "Systems"
     cd = CountryData(output_type = "sql")
     cd.grab_country_info()
 
@@ -335,17 +347,18 @@ def main():
     #result = td.get_data()
     #print(result.columns)
     #print(result)
+
+    filename = "data/statistik_import_NV_" + file_suffix + ".xlsx"
     
-    imp = ImportFile("data/statistik_import.xlsx")
+    imp = ImportFile(filename)
     imp.load_file()
     test_file = imp.input_file
-    #get_tariffs(test_file)
+    df = get_tariffs(test_file)
     fta = pd.read_csv("data/fta.txt")
-    print(fta)
 
-    df = pd.read_csv("data/mid_result.csv")
+    #df = pd.read_csv("data/mid_result_2.csv")
 
-    final_result = convert_result(df,test_file,fta,eu_countries)
+    final_result = convert_result(df,test_file,fta,eu_countries,filename = file_suffix)
     print(final_result)
 
 
