@@ -1,10 +1,12 @@
 import requests
 import pandas as pd
+import numpy as np
 import sys
 from tqdm import tqdm
 import sqlite3
 from time import sleep
 from random import random
+import pickle
 
 class CountryData:
     """
@@ -69,7 +71,12 @@ class TariffData:
         return url
 
     def get_json(self,url):
-        headers = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"}
+        headers = {"Connection":"keep-alive",
+            "Host":"trade.ec.europa.eu",
+            "Referer":"https://trade.ec.europa.eu/access-to-markets/en/results?product=100890&origin=NO&destination=SE",
+            "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+            "Sec-Fetch-Site":"same-origin"
+                    }
         res = requests.get(url,headers = headers)
         return res.json()
 
@@ -97,24 +104,53 @@ class TariffData:
             return 0
 
         if get_recursive:
+            errors = [0,0,0,0,0,0,0,0,0,0]
+            errored_products = []
 
             for product in tqdm(self.product_list):
+                
                 for og_country in self.country_of_origin:
-                    url = self.get_url(product,og_country,self.country_of_destination)
-                    json_obj = self.get_json(url)
                     try:
+                        url = self.get_url(product,og_country,self.country_of_destination)
+                        
+                        json_obj = self.get_json(url)
+                    
                         df = self.get_response_df(json_obj)
-                        df.loc[:,"product_id"] = product
-                        df.loc[:,"country_of_origin"] = og_country
+                        df = df.loc[df.loc[:,"type"] == "Third country duty",:]
+                        if len(df) == 0:
+                            pass
+                        else:
+                            
+
+                            df.loc[:,"product_id"] = product
+                            df.loc[:,"country_of_origin"] = og_country
+                            dfs.append(df)
+                        
+                        
+                        
 
                     except Exception as e:
-                        pass
+                        print(e)
+                        exeptions += 1
+                        errors.append(1)
+                        errors = errors[1:]
+                        errored_products.append(product)
 
-                    dfs.append(df)
+
+                    if np.sum(errors) >= 9:
+                        sleep(60*30)
+
+                    else:
+                        sleep(1 + random())
+
+                    
 
         else:
             
             assert len(self.product_list) == len(self.country_of_origin)
+            errors = [0,0,0,0,0,0,0,0,0,0]
+            errored_products = []
+
             for i in tqdm(range(len(self.product_list))):
                 og_country = self.country_of_origin[i]
                 product = self.product_list[i]
@@ -130,9 +166,17 @@ class TariffData:
                     dfs.append(df)
                 except Exception as e:
                         exeptions += 1
+                        errors.append(1)
+                        errors = errors[1:]
+                        errored_products.append(product)
 
-                
-                sleep(1 + random())
+                if np.sum(errors) >= 9:
+                    sleep(60*30)
+                    errors = [0,0,0,0,0,0,0,0,0,0]
+
+
+                else:
+                    sleep(1 + random())
 
         print("Number of exceptions thrown = {}".format(exeptions))
 
@@ -141,7 +185,7 @@ class TariffData:
 
         #self.export_results(final_df)
 
-        return final_df
+        return final_df,errored_products
 
     def export_results(self,df):
         """"
@@ -211,22 +255,37 @@ class ProductData:
         self.start_level = start_level
         self.product_ids = []
 
+    def get_json(self,url):
+        headers = {"Connection":"keep-alive",
+            "Host":"trade.ec.europa.eu",
+            "Referer":"https://trade.ec.europa.eu/access-to-markets/en/results?product=100890&origin=NO&destination=SE",
+            "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+            "Sec-Fetch-Site":"same-origin"
+                    }
+        res = requests.get(url,headers = headers)
+        return res.json()
+
 
     def traverse(self,start_id = None):
         if start_id == None:
-            start_id = self.start_id
+            start_id = self.start_level
             
-        url = "https://trade.ec.europa.eu/access-to-markets/api/v2/nomenclature/products?country=SE&lang=EN&parent={}".format(start_id)
-        result = requests.get(url).json()
+        try:
+            url = "https://trade.ec.europa.eu/access-to-markets/api/v2/nomenclature/products?country=SE&lang=EN&parent={}".format(start_id)
+            result = self.get_json(url)
         
-        for resp in result:
-            if resp["hasChildren"] == False:
-                self.product_codes.append(resp["code"])
+            for resp in result:
+                if resp["hasChildren"] == False:
+                    print(resp["code"])
+                    self.product_ids.append(resp["code"])
                 
-            else:
-                self.traverse(start_id = resp["id"])
+                else:
+                    self.traverse(start_id = resp["id"])
+
+        except:
+            pass
                 
-        return self.product_codes
+        #return self.product_ids
 
 
 
@@ -243,7 +302,9 @@ def get_tariffs(df1):
 
 
     td = TariffData(products,og_countries,"SE")
-    result = td.get_data(get_recursive = False)
+    result,errored_products = td.get_data(get_recursive = False)
+
+    pickle.dump(errored_products,open("errors.p","wb"))
 
     result.to_csv("data/mid_result_2.csv")
 
@@ -320,12 +381,25 @@ def convert_result(result,df1,fta,eu_countries,filename = "2"):
 
 
 
+def get_tarrifs_2(products,origin,destination,product_type):
+    td = TariffData(products,origin,destination)
+    result ,errored_products= td.get_data()
+
+    pickle.dump(errored_products,open("errors.p","wb"))
+
+    result.to_csv("data/testtest_{}.csv".format(product_type))
+
+    return result
+
+
 
 
 
 def main():
 
     file_suffix = "Systems"
+    product_type = "3"
+    get_products = False
     cd = CountryData(output_type = "sql")
     cd.grab_country_info()
 
@@ -333,33 +407,43 @@ def main():
 
     eu_countries = cd.country_data.loc[cd.country_data.memberState == True,:].code.values
 
-    #print("Done")
+    print("Done")
+
+    if get_products:
+
+        pd = ProductData(start_level="-{}".format(product_type))
+        pd.traverse()
+        print(pd.product_ids)
+
+        pickle.dump(pd.product_ids,open("products_{}.p".format(product_type),"wb"))
+
+
+    
 
 
 
 
-    product_list = ['010121','01012910','01012990','010130']
-    country_of_origins = ["US","CA","NO","CN","CH"]
+    #product_list = ['010121','01012910','01012990','010130']
+    #country_of_origins = ["US","CA","NO","CN","CH"]
+    product_list = pickle.load(open("products_{}.p".format(product_type),"rb"))
+    country_of_origins = ["NO"]
     country_of_destination = "SE"
+    result = get_tarrifs_2(product_list,country_of_origins,country_of_destination,product_type)
+    print(result)
     
-    #td = TariffData(product_list,country_of_origins,country_of_destination)
 
-    #result = td.get_data()
-    #print(result.columns)
-    #print(result)
-
-    filename = "data/statistik_import_NV_" + file_suffix + ".xlsx"
+    #filename = "data/statistik_import_NV_" + file_suffix + ".xlsx"
     
-    imp = ImportFile(filename)
-    imp.load_file()
-    test_file = imp.input_file
-    df = get_tariffs(test_file)
-    fta = pd.read_csv("data/fta.txt")
+    #imp = ImportFile(filename)
+    #imp.load_file()
+    #test_file = imp.input_file
+    #df = get_tariffs(test_file)
+    #fta = pd.read_csv("data/fta.txt")
 
     #df = pd.read_csv("data/mid_result_2.csv")
 
-    final_result = convert_result(df,test_file,fta,eu_countries,filename = file_suffix)
-    print(final_result)
+    #final_result = convert_result(df,test_file,fta,eu_countries,filename = file_suffix)
+    #print(final_result)
 
 
 
