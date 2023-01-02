@@ -206,14 +206,15 @@ class TariffData:
 
 
 class ImportFile:
-    def __init__(self,filename):
+    def __init__(self,filename,header = 0):
         self.filename = filename
         self.filetype = None
+        self.header = header
     
     def load_file(self):
         if self.filename[-4:] == "xlsx":
             try:
-                self.input_file = pd.read_excel(self.filename)
+                self.input_file = pd.read_excel(self.filename,header = self.header)
                 self.input_file.columns = self.input_file.iloc[6,:].values
                 self.input_file = self.input_file.iloc[7:,:].reset_index(drop = True)
                 self.filetype = "xlsx"
@@ -225,7 +226,7 @@ class ImportFile:
 
         if self.filename[-3:] == "csv":
             try:
-                self.input_file = pd.read_csv(self.filename,dtype = str)
+                self.input_file = pd.read_csv(self.filename,dtype = str,heade  =self.header)
                 self.filetype = "csv"
                 return 0
 
@@ -391,8 +392,226 @@ def get_tarrifs_2(products,origin,destination,product_type):
 
     return result
 
+def import_file(name,type = "csv"):
+    if type == "csv":
+        df = pd.read_csv(name)
+
+    else:
+
+        df = pd.read_excel(name)
+    return df
+
+def fix_code(x):
+    c = str(x)
+    if len(c) == 10:
+        return int(c)
+    else:
+        return fix_code(c + "0")
 
 
+def calc_forman_savings(row):
+    third = row.Tredjelandstullsats
+    pref = row.Preferenstullsats
+    val = row.loc["Statistiskt värde"]
+
+    if third == None:
+        third = 0
+    else:
+        third = float(third.replace(" ","").replace("%",""))/100
+
+    if pref == None:
+        pref = 0
+
+    else:
+        pref = float(pref.replace(" ","").replace("%",""))/100
+
+    if val == None:
+        val = 0
+
+    else:
+        val = float(val)
+
+    
+    
+    return val*(third - pref)
+
+def calc_auto_savings(row):
+    third = row.Tredjelandstullsats
+    pref = row.loc["Autonom suspension tullsats"]
+    val = row.loc["Statistiskt värde"]
+
+    if third == None:
+        third = 0
+    else:
+        third = float(third.replace(" ","").replace("%",""))/100
+
+    if pref == None:
+        pref = 0
+
+    else:
+        pref = float(pref.replace(" ","").replace("%",""))/100
+
+    if val == None:
+        val = 0
+
+    else:
+        val = float(val)
+
+    
+    
+    return val*(third - pref)
+
+
+
+def main_2():
+    file_suffix = "Systems"
+    df = import_file("data/duty.csv")
+
+    df.columns = [x.lower().replace(" ","") for x in df.columns]
+
+
+    df.loc[:,"goodscode"] = [str(x) for x in df.goodscode]
+
+    df.loc[:,"goodscode"] = df.goodscode.apply(lambda x : fix_code(x))
+
+    print(df.loc[df.origin == "ERGA OMNES",:])
+
+
+
+    
+    filename = "data/Exempelstatistik.xlsx"
+    imp = ImportFile(filename,header = 0)
+    imp.load_file()
+    test_file = imp.input_file
+    fta = pd.read_csv("data/fta.txt")
+    print(fta)
+
+    print(test_file.columns)
+    test_file.loc[:,"Avsändarland"] = None
+    test_file.loc[:,"Importvärde"] = None
+    test_file.loc[:,"Avgift tull"] = None
+
+    test_file.loc[:,"Avgift Tilläggstull"] = None
+    test_file.loc[:,"Avgift Mervärdeskatt"] = None
+    test_file.loc[:,"Avgift Kemikalieskatt"] = None
+    test_file.loc[:,"Avgift Mervärdeskatt"] = None
+    test_file.loc[:,"Tredjelandstullsats"] = None
+    test_file.loc[:,"Preferenstullsats"] = None
+    test_file.loc[:,"Autonom suspension tullsats"] = None
+    test_file.loc[:,"Sparande preferens"] = None
+    test_file.loc[:,"Sparande autonom suspension"] = None
+
+    test_file.loc[:,"Sparande IPR"] = None
+    test_file.loc[:,"Potentiellt sparande"] = None
+    test_file.loc[:,"Potentiellt fel"] = None
+
+
+
+
+    columns = ["Tull-id","Tx dag","Varupost antal","Deklarationssätt","Deklarationstyp","Transportsätt vid gräns",
+    "Transportsätt inrikes","Avsändare","Avsändarland","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
+    "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
+    "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Tredjelandstullsats","Preferenstullsats",
+    "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Potentiellt sparande","Potentiellt fel"]
+
+    print(df.measuretype.unique())
+
+    n = len(test_file)
+    n = 300
+    for row in tqdm(range(n)):
+        if test_file.iloc[row,:].loc["Avsändare"][-3:] == " AS":
+            k = test_file.columns.get_loc("Avsändarland")
+            test_file.iloc[row,k] = "Norge"
+
+        if test_file.iloc[row,:].loc["Avgiftsslag"] == "Monetärt tullvärde":
+            k = test_file.columns.get_loc("Importvärde")
+            test_file.iloc[row,k] = test_file.iloc[row,:].loc["Statistiskt värde"]
+
+        if test_file.iloc[row,:].loc["Avgiftsslag"] == "Tull":
+            k = test_file.columns.get_loc("Avgift tull")
+            test_file.iloc[row,k] = test_file.iloc[row,:].loc["Avgift belopp"]
+
+        if test_file.iloc[row,:].loc["Avgiftsslag"] == "Tilläggstull":
+            k = test_file.columns.get_loc("Avgift Tilläggstull")
+            test_file.iloc[row,k] = test_file.iloc[row,:].loc["Avgift belopp"]
+
+        if test_file.iloc[row,:].loc["Avgiftsslag"] == "Mervärdeskatt":
+            k = test_file.columns.get_loc("Avgift Mervärdeskatt")
+            test_file.iloc[row,k] = test_file.iloc[row,:].loc["Avgift belopp"]
+
+        if test_file.iloc[row,:].loc["Avgiftsslag"] == "Kemikalieskatt":
+            k = test_file.columns.get_loc("Avgift Kemikalieskatt")
+            test_file.iloc[row,k] = test_file.iloc[row,:].loc["Avgift belopp"]
+
+        
+        k = test_file.columns.get_loc("Tredjelandstullsats")
+        j = test_file.columns.get_loc("Varukod")
+        origin_index = test_file.columns.get_loc("Ursprungsland")
+
+        pref_index = test_file.columns.get_loc("Preferenstullsats")
+        auto_index = test_file.columns.get_loc("Autonom suspension tullsats")
+        forman_index = test_file.columns.get_loc("Förmånskod")
+        sparande_index = test_file.columns.get_loc("Sparande preferens")
+        auto_saving_index = test_file.columns.get_loc("Sparande autonom suspension")
+        potential_index = test_file.columns.get_loc("Potentiellt sparande")
+
+
+        val = int(test_file.iloc[row,j])
+
+        sdf = df.loc[df.goodscode == val,:]
+
+        duty = sdf.loc[(df.origin == "ERGA OMNES") & (df.measuretype == "Third country duty") & (df.addcode == "2501"),"duty"].values
+        if len(duty) == 1:
+            test_file.iloc[row,k] = duty[0]
+
+        tp = sdf.loc[(df.origin == test_file.iloc[row,origin_index]) & df.measuretype == "Tariff preference","duty"].values
+
+        if len(tp) == 1:
+            test_file.iloc[row,pref_index] = tp[0]
+
+
+        ats = sdf.loc[(df.origin == test_file.iloc[row,origin_index]) & df.measuretype == "Autonomous tariff suspension","duty"].values
+
+        if len(ats) == 1:
+            test_file.iloc[row,auto_index] = tp[0]
+
+
+        if test_file.iloc[row,forman_index] == "300":
+             test_file.iloc[row,sparande_index] = calc_forman_savings(test_file.iloc[row,:])
+
+        if test_file.iloc[row,forman_index] == "110":
+             test_file.iloc[row,auto_saving_index] = calc_auto_savings(test_file.iloc[row,:])
+
+
+        if test_file.iloc[row,:].loc["Avgiftsslag"] == "Tull":
+            if test_file.iloc[row,forman_index] != "300":
+                if test_file.iloc[row,origin_index] in fta.country:
+                    test_file.iloc[row,potential_index] = calc_forman_savings(test_file.iloc[row,:])
+
+
+        
+
+
+        
+
+        
+
+        
+
+        
+    
+
+        
+
+        
+
+
+    
+
+    test_file = test_file.loc[:,columns]
+
+    test_file.to_excel("test_export.xlsx")
+    
 
 
 def main():
@@ -448,4 +667,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main_2()
