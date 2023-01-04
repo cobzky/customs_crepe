@@ -398,11 +398,13 @@ def import_file(name,type = "csv"):
 
     else:
 
-        df = pd.read_excel(name)
+        df = pd.read_excel(name,converters = {"Goods code":str})
     return df
 
 def fix_code(x):
+    return int(x)
     c = str(x)
+
     if len(c) == 10:
         return int(c)
     else:
@@ -461,11 +463,33 @@ def calc_auto_savings(row):
     
     return val*(third - pref)
 
+def find_product(val,df,k = 1):
+    result = df.loc[df.goodscode == val,:]
+    result  = result.loc[(result.origin == "ERGA OMNES") & (result.measuretype == "Third country duty"),:]
+    if len(result) > 0:
+        return result,k
+    else:
+        new_val = int(str(val)[:-k] + k*"0")
+        return find_product(new_val,df,k+1)
 
+
+def find_product_for_pref(val,df,origin, k = 1):
+    result = df.loc[df.goodscode == val,:]
+    result  = result.loc[(result.origincode == origin) & (result.measuretype == "Tariff preference"),:]
+    if k >= 6:
+        return result,k
+
+    if len(result) > 0:
+        return result,k
+    else:
+        new_val = int(str(val)[:-k] + k*"0")
+        return find_product_for_pref(new_val,df,origin,k+1)
 
 def main_2():
     file_suffix = "Systems"
-    df = import_file("data/duty.csv")
+    df = import_file("data/duties2022.xlsx","xlxs")
+
+    print(df.head(100))
 
     df.columns = [x.lower().replace(" ","") for x in df.columns]
 
@@ -479,7 +503,7 @@ def main_2():
 
 
     
-    filename = "data/Exempelstatistik.xlsx"
+    filename = "data/statistik_import_2022-01-01_2022-12-31_AB.xlsx"
     imp = ImportFile(filename,header = 0)
     imp.load_file()
     test_file = imp.input_file
@@ -504,6 +528,7 @@ def main_2():
     test_file.loc[:,"Sparande IPR"] = None
     test_file.loc[:,"Potentiellt sparande"] = None
     test_file.loc[:,"Potentiellt fel"] = None
+    test_file.loc[:,"check"] = None
 
 
 
@@ -512,12 +537,12 @@ def main_2():
     "Transportsätt inrikes","Avsändare","Avsändarland","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
     "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
     "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Tredjelandstullsats","Preferenstullsats",
-    "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Potentiellt sparande","Potentiellt fel"]
+    "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Potentiellt sparande","Potentiellt fel","check"]
 
     print(df.measuretype.unique())
 
     n = len(test_file)
-    n = 300
+    #n = 300
     for row in tqdm(range(n)):
         if test_file.iloc[row,:].loc["Avsändare"][-3:] == " AS":
             k = test_file.columns.get_loc("Avsändarland")
@@ -554,23 +579,42 @@ def main_2():
         sparande_index = test_file.columns.get_loc("Sparande preferens")
         auto_saving_index = test_file.columns.get_loc("Sparande autonom suspension")
         potential_index = test_file.columns.get_loc("Potentiellt sparande")
+        check_index = test_file.columns.get_loc("check")
 
 
         val = int(test_file.iloc[row,j])
 
-        sdf = df.loc[df.goodscode == val,:]
+        sdf,iterations = find_product(val,df,k = 1)
 
-        duty = sdf.loc[(df.origin == "ERGA OMNES") & (df.measuretype == "Third country duty") & (df.addcode == "2501"),"duty"].values
+        #print(sdf)
+
+        #sdf = df.loc[df.goodscode == val,:]
+
+        if iterations > 1:
+            test_file.iloc[row,check_index] = "X"
+
+        duty = sdf.loc[((sdf.addcode == "2500")  | (sdf.addcode.isna())),"duty"].values
         if len(duty) == 1:
             test_file.iloc[row,k] = duty[0]
 
-        tp = sdf.loc[(df.origin == test_file.iloc[row,origin_index]) & df.measuretype == "Tariff preference","duty"].values
+        else:
+            print(duty)
+            print(sdf)
+            print(iterations)
+            print("Code {} not found in imported data".format(val))
+
+
+        tp,iters_2 = find_product_for_pref(val,df,test_file.iloc[row,origin_index])  
+        tp = tp.loc[:,"duty"].values
 
         if len(tp) == 1:
             test_file.iloc[row,pref_index] = tp[0]
 
+        if iterations > 1:
+            test_file.iloc[row,check_index] = "X"
 
-        ats = sdf.loc[(df.origin == test_file.iloc[row,origin_index]) & df.measuretype == "Autonomous tariff suspension","duty"].values
+
+        ats = sdf.loc[(sdf.origin == test_file.iloc[row,origin_index]) & sdf.measuretype == "Autonomous tariff suspension","duty"].values
 
         if len(ats) == 1:
             test_file.iloc[row,auto_index] = tp[0]
