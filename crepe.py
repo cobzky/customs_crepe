@@ -7,6 +7,7 @@ import sqlite3
 from time import sleep
 from random import random
 import pickle
+from datetime import datetime,timedelta
 
 class CountryData:
     """
@@ -463,19 +464,28 @@ def calc_auto_savings(row):
     
     return val*(third - pref)
 
-def find_product(val,df,k = 1):
-    result = df.loc[df.goodscode == val,:]
-    result  = result.loc[(result.origin == "ERGA OMNES") & (result.measuretype == "Third country duty"),:]
-    if len(result) > 0:
-        return result,k
+def find_product(val,df,db,k = 1):
+    res = db.read(val,"ERGA OMNES","Third country duty")
+    if res == None:
+        result = df.loc[df.goodscode == val,:]
+        result  = result.loc[(result.origin == "ERGA OMNES") & (result.measuretype == "Third country duty"),:]
+        if len(result) > 0:
+            duty = result.loc[((result.addcode == "2500")  | (result.addcode.isna())),"duty"].values[0]
+            db.write(val,"ERGA OMNES","Third country duty",duty,"2023-02-01")
+            return duty,k
+        else:
+            new_val = int(str(val)[:-k] + k*"0")
+            return find_product(new_val,df,db,k+1)
+
     else:
-        new_val = int(str(val)[:-k] + k*"0")
-        return find_product(new_val,df,k+1)
+        return res,1
 
 
-def find_product_for_pref(val,df,origin, k = 1):
+def find_product_for_pref(val,df,origin, country_groups,k = 1):
+    memberships = list(country_groups.loc[country_groups.member_country == origin,"country_group"].values)
+    memberships.append(origin)
     result = df.loc[df.goodscode == val,:]
-    result  = result.loc[(result.origincode == origin) & (result.measuretype == "Tariff preference"),:]
+    result  = result.loc[(result.origincode.isin(memberships)) & (result.measuretype == "Tariff preference"),:]
     if k >= 6:
         return result,k
 
@@ -483,13 +493,79 @@ def find_product_for_pref(val,df,origin, k = 1):
         return result,k
     else:
         new_val = int(str(val)[:-k] + k*"0")
-        return find_product_for_pref(new_val,df,origin,k+1)
+        return find_product_for_pref(new_val,df,origin,country_groups,k+1)
+
+class DB_connect:
+    def __init__(self):
+        self.db_name = "CustomsDatabase"
+
+    def return_cursor(self):
+        con = sqlite3.connect(self.db_name)
+        return con.cursor(),con
+
+        
+    def check_database(self):
+        cur,con = self.return_cursor()
+        try:
+            res = cur.execute("SELECT * FROM tariff_data WHERE active = True")
+            df = res.fetchall()
+            print(df)
+
+        except:
+            cur.execute("CREATE TABLE tariff_data(code,origin_country,type,duty,change_date,to_date,active)")
+
+    def test_add(self):
+        cur,con = self.return_cursor()
+
+        cur.execute("""INSERT INTO tariff_data VALUES
+        ('00000','Nagiala','Third country duty',0,{},Null,False)
+        """.format(datetime.today().date()))
+
+        con.commit()
+
+    def test_read(self):
+        cur,con = self.return_cursor()
+
+        res = cur.execute("SELECT * FROM tariff_data")
+        for row in res:
+            print(row)
+
+
+    def read(self,code,origin,type_):
+        cur,con = self.return_cursor()
+        cur.execute("""
+        SELECT duty FROM tariff_data WHERE code = '{}' AND origin_country = '{}' AND type = '{}' AND active = 1
+        """.format(code,origin,type_))
+
+        res = cur.fetchone()
+        return res
+
+    def write(self,code,origin,type_,duty,end_date):
+        cur,con = self.return_cursor()
+        cur.execute("""INSERT INTO tariff_data VALUES
+        ('{}','{}','{}','{}','{}','{}',True)
+        """.format(code,origin,type_,duty,datetime.today().date(),end_date))
+
+        con.commit()
+
+
 
 def main_2():
-    file_suffix = "Systems"
-    df = import_file("data/duties2022.xlsx","xlxs")
+    #file_suffix = "Systems"
 
-    print(df.head(100))
+    db = DB_connect()
+    db.check_database()
+    db.test_read()
+
+
+
+
+    df = import_file("data/duties2022.xlsx","xlsx")
+
+    country_groups = import_file("data/geographical_areas.xlsx","xlsx")
+
+    country_groups.columns = [x.lower().replace(" ","_") for x in country_groups.columns]
+    country_groups = country_groups.loc[:,["country_group","member_country"]]
 
     df.columns = [x.lower().replace(" ","") for x in df.columns]
 
@@ -497,20 +573,14 @@ def main_2():
     df.loc[:,"goodscode"] = [str(x) for x in df.goodscode]
 
     df.loc[:,"goodscode"] = df.goodscode.apply(lambda x : fix_code(x))
-
-    print(df.loc[df.origin == "ERGA OMNES",:])
-
-
-
-    
     filename = "data/statistik_import_2022-01-01_2022-12-31_AB.xlsx"
     imp = ImportFile(filename,header = 0)
     imp.load_file()
     test_file = imp.input_file
     fta = pd.read_csv("data/fta.txt")
-    print(fta)
+    
 
-    print(test_file.columns)
+    
     test_file.loc[:,"Avsändarland"] = None
     test_file.loc[:,"Importvärde"] = None
     test_file.loc[:,"Avgift tull"] = None
@@ -538,8 +608,7 @@ def main_2():
     "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
     "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Tredjelandstullsats","Preferenstullsats",
     "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Potentiellt sparande","Potentiellt fel","check"]
-
-    print(df.measuretype.unique())
+    
 
     n = len(test_file)
     #n = 300
@@ -584,27 +653,16 @@ def main_2():
 
         val = int(test_file.iloc[row,j])
 
-        sdf,iterations = find_product(val,df,k = 1)
-
-        #print(sdf)
-
-        #sdf = df.loc[df.goodscode == val,:]
+        duty,iterations = find_product(val,df,db,k = 1)
 
         if iterations > 1:
             test_file.iloc[row,check_index] = "X"
 
-        duty = sdf.loc[((sdf.addcode == "2500")  | (sdf.addcode.isna())),"duty"].values
-        if len(duty) == 1:
-            test_file.iloc[row,k] = duty[0]
+        #duty = sdf.loc[((sdf.addcode == "2500")  | (sdf.addcode.isna())),"duty"].values
+        #if len(duty) == 1:
+        test_file.iloc[row,k] = duty[0]
 
-        else:
-            print(duty)
-            print(sdf)
-            print(iterations)
-            print("Code {} not found in imported data".format(val))
-
-
-        tp,iters_2 = find_product_for_pref(val,df,test_file.iloc[row,origin_index])  
+        tp,iters_2 = find_product_for_pref(val,df,test_file.iloc[row,origin_index],country_groups)  
         tp = tp.loc[:,"duty"].values
 
         if len(tp) == 1:
@@ -614,7 +672,7 @@ def main_2():
             test_file.iloc[row,check_index] = "X"
 
 
-        ats = sdf.loc[(sdf.origin == test_file.iloc[row,origin_index]) & sdf.measuretype == "Autonomous tariff suspension","duty"].values
+        ats = df.loc[(df.origin == test_file.iloc[row,origin_index]) & df.measuretype == "Autonomous tariff suspension","duty"].values
 
         if len(ats) == 1:
             test_file.iloc[row,auto_index] = tp[0]
@@ -633,24 +691,6 @@ def main_2():
                     test_file.iloc[row,potential_index] = calc_forman_savings(test_file.iloc[row,:])
 
 
-        
-
-
-        
-
-        
-
-        
-
-        
-    
-
-        
-
-        
-
-
-    
 
     test_file = test_file.loc[:,columns]
 
