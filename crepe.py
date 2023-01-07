@@ -152,7 +152,7 @@ class TariffData:
             errors = [0,0,0,0,0,0,0,0,0,0]
             errored_products = []
 
-            for i in tqdm(range(len(self.product_list))):
+            for i in range(len(self.product_list)):
                 og_country = self.country_of_origin[i]
                 product = self.product_list[i]
 
@@ -179,8 +179,7 @@ class TariffData:
                 else:
                     sleep(1 + random())
 
-        print("Number of exceptions thrown = {}".format(exeptions))
-
+        #print("Number of exceptions thrown = {}".format(exeptions))
         final_df = pd.concat(dfs)
         final_df = final_df.loc[:,["origin","type","startDate","endDate","exclusions","tariffFormula","product_id","country_of_origin"]]
 
@@ -481,19 +480,30 @@ def find_product(val,df,db,k = 1):
         return res,1
 
 
-def find_product_for_pref(val,df,origin, country_groups,k = 1):
+def find_product_for_pref(val,df,origin, country_groups,db,k = 1):
     memberships = list(country_groups.loc[country_groups.member_country == origin,"country_group"].values)
     memberships.append(origin)
-    result = df.loc[df.goodscode == val,:]
-    result  = result.loc[(result.origincode.isin(memberships)) & (result.measuretype == "Tariff preference"),:]
-    if k >= 6:
-        return result,k
 
-    if len(result) > 0:
-        return result,k
+    res = db.read(val,origin,"Tariff preference")
+
+    if res == None:
+
+        result = df.loc[df.goodscode == val,:]
+        result  = result.loc[(result.origincode.isin(memberships)) & (result.measuretype == "Tariff preference"),:]
+    
+        if k >= 8:
+            return [None],k
+
+        if len(result) > 0:
+            duty = result.loc[:,"duty"].values[0]
+            db.write(val,origin,"Tariff preference",duty,"2023-02-01")
+            return duty,k
+        else:
+            new_val = int(str(val)[:-k] + k*"0")
+            return find_product_for_pref(new_val,df,origin,country_groups,db,k+1)
+
     else:
-        new_val = int(str(val)[:-k] + k*"0")
-        return find_product_for_pref(new_val,df,origin,country_groups,k+1)
+        return res,1
 
 class DB_connect:
     def __init__(self):
@@ -509,7 +519,6 @@ class DB_connect:
         try:
             res = cur.execute("SELECT * FROM tariff_data WHERE active = True")
             df = res.fetchall()
-            print(df)
 
         except:
             cur.execute("CREATE TABLE tariff_data(code,origin_country,type,duty,change_date,to_date,active)")
@@ -548,6 +557,17 @@ class DB_connect:
 
         con.commit()
 
+def try_from_atm(code,origin,db):
+    tf = TariffData([code],[origin],"SE")
+
+    res,error = tf.get_data(get_recursive = False)
+
+    res = res.loc[res.loc[:,"type"] == "Tariff preference",:]
+    if len(res) > 0:
+        duty = res.loc[:,"tariffFormula"].values[0]
+        end_date = res.loc[:,"endDate"].values[0]
+        db.write(code,origin,"Tariff preference",duty,end_date)
+        return duty
 
 
 def main_2():
@@ -662,11 +682,15 @@ def main_2():
         #if len(duty) == 1:
         test_file.iloc[row,k] = duty[0]
 
-        tp,iters_2 = find_product_for_pref(val,df,test_file.iloc[row,origin_index],country_groups)  
-        tp = tp.loc[:,"duty"].values
+        tp,iters_2 = find_product_for_pref(val,df,test_file.iloc[row,origin_index],country_groups,db)  
+        #tp = tp.loc[:,"duty"].values
 
-        if len(tp) == 1:
-            test_file.iloc[row,pref_index] = tp[0]
+        #if len(tp) == 1:
+
+        if tp[0] == None:
+            try_from_atm(val,test_file.iloc[row,origin_index],db)
+
+        test_file.iloc[row,pref_index] = tp[0]
 
         if iterations > 1:
             test_file.iloc[row,check_index] = "X"
