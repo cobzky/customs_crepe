@@ -177,12 +177,14 @@ class TariffData:
 
 
                 else:
-                    sleep(1 + random())
+                    sleep(0 + random())
 
         #print("Number of exceptions thrown = {}".format(exeptions))
-        final_df = pd.concat(dfs)
-        final_df = final_df.loc[:,["origin","type","startDate","endDate","exclusions","tariffFormula","product_id","country_of_origin"]]
-
+        try:
+            final_df = pd.concat(dfs)
+            final_df = final_df.loc[:,["origin","type","startDate","endDate","exclusions","tariffFormula","product_id","country_of_origin"]]
+        except:
+            final_df = None
         #self.export_results(final_df)
 
         return final_df,errored_products
@@ -424,6 +426,9 @@ def calc_forman_savings(row):
     if pref == None:
         pref = 0
 
+    elif pref == "None":
+        pref = 0
+
     else:
         pref = float(pref.replace(" ","").replace("%",""))/100
 
@@ -465,6 +470,9 @@ def calc_auto_savings(row):
 
 def find_product(val,df,db,k = 1):
     res = db.read(val,"ERGA OMNES","Third country duty")
+    if k > 10:
+        return None,0
+    
     if res == None:
         result = df.loc[df.goodscode == val,:]
         result  = result.loc[(result.origin == "ERGA OMNES") & (result.measuretype == "Third country duty"),:]
@@ -562,15 +570,23 @@ def try_from_atm(code,origin,db):
 
     res,error = tf.get_data(get_recursive = False)
 
-    res = res.loc[res.loc[:,"type"] == "Tariff preference",:]
-    if len(res) > 0:
-        duty = res.loc[:,"tariffFormula"].values[0]
-        end_date = res.loc[:,"endDate"].values[0]
-        db.write(code,origin,"Tariff preference",duty,end_date)
-        return duty
 
 
-def main_2():
+    try:
+
+        res = res.loc[res.loc[:,"type"] == "Tariff preference",:]
+        if len(res) > 0:
+            duty = res.loc[:,"tariffFormula"].values[0]
+            end_date = res.loc[:,"endDate"].values[0]
+            db.write(code,origin,"Tariff preference",duty,end_date)
+            return duty
+    except Exception as e:
+        db.write(code,origin,"Tariff preference",None,None)
+        return None 
+    return None
+
+
+def run_scripts(filename):
     #file_suffix = "Systems"
 
     db = DB_connect()
@@ -593,7 +609,7 @@ def main_2():
     df.loc[:,"goodscode"] = [str(x) for x in df.goodscode]
 
     df.loc[:,"goodscode"] = df.goodscode.apply(lambda x : fix_code(x))
-    filename = "data/statistik_import_2022-01-01_2022-12-31_AB.xlsx"
+    #filename = "data/statistik_import_2022-01-01_2022-12-31_AB.xlsx"
     imp = ImportFile(filename,header = 0)
     imp.load_file()
     test_file = imp.input_file
@@ -680,7 +696,13 @@ def main_2():
 
         #duty = sdf.loc[((sdf.addcode == "2500")  | (sdf.addcode.isna())),"duty"].values
         #if len(duty) == 1:
-        test_file.iloc[row,k] = duty[0]
+        if duty == None:
+            
+            test_file.iloc[row,k] = None
+
+        else:
+            test_file.iloc[row,k] = duty[0]
+            
 
         tp,iters_2 = find_product_for_pref(val,df,test_file.iloc[row,origin_index],country_groups,db)  
         #tp = tp.loc[:,"duty"].values
@@ -718,7 +740,27 @@ def main_2():
 
     test_file = test_file.loc[:,columns]
 
+    return test_file
+
     test_file.to_excel("test_export.xlsx")
+    
+
+def main_2():
+    files = ["data/statistik_import_2022-01-01_2022-12-31_AB.xlsx",
+    "data/statistik_import_2022-01-01_2022-12-31_ETT.xlsx",
+    "data/statistik_import_2022-01-01_2022-12-31_LABS.xlsx",
+    "data/statistik_import_2022-01-01_2022-12-31_Systems.xlsx"]
+
+    dfs = []
+
+    for file_name in files:
+        df = run_scripts(file_name)
+        df.loc[:,"entity"] = file_name
+        dfs.append(df)
+
+    result_df = pd.concat(dfs)
+    result_df.to_excel("data/test_export_final.xlsx")
+
     
 
 
