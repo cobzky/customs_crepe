@@ -479,7 +479,7 @@ def find_product(val,df,db,k = 1):
         if len(result) > 0:
             duty = result.loc[((result.addcode == "2500")  | (result.addcode.isna())),"duty"].values[0]
             db.write(val,"ERGA OMNES","Third country duty",duty,"2023-02-01")
-            return duty,k
+            return list(duty),k
         else:
             new_val = int(str(val)[:-k] + k*"0")
             return find_product(new_val,df,db,k+1)
@@ -691,6 +691,8 @@ def run_scripts(filename):
 
         duty,iterations = find_product(val,df,db,k = 1)
 
+        #assert type(duty) == list, print(test_file.iloc[row,:])
+
         if iterations > 1:
             test_file.iloc[row,check_index] = "X"
 
@@ -721,7 +723,7 @@ def run_scripts(filename):
         ats = df.loc[(df.origin == test_file.iloc[row,origin_index]) & df.measuretype == "Autonomous tariff suspension","duty"].values
 
         if len(ats) == 1:
-            test_file.iloc[row,auto_index] = tp[0]
+            test_file.iloc[row,auto_index] = ats[0]
 
 
         if test_file.iloc[row,forman_index] == "300":
