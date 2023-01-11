@@ -442,6 +442,23 @@ def calc_forman_savings(row):
     
     return val*(third - pref)
 
+def calc_ipr(row):
+    third = row.Tredjelandstullsats
+    val = row.loc["Statistiskt värde"]
+    if third == None:
+        third = 0
+    else:
+        third = float(third.replace(" ","").replace("%",""))/100
+
+    if val == None:
+        val = 0
+
+    else:
+        val = float(val)
+
+    return (0.05 - thrid)*val
+
+
 def calc_auto_savings(row):
     third = row.Tredjelandstullsats
     pref = row.loc["Autonom suspension tullsats"]
@@ -468,7 +485,7 @@ def calc_auto_savings(row):
     
     return val*(third - pref)
 
-def find_product(val,df,db,k = 1):
+def find_product(val,df,db,k = 1,atm_access = False):
     res = db.read(val,"ERGA OMNES","Third country duty")
     if k > 10:
         return None,0
@@ -488,7 +505,7 @@ def find_product(val,df,db,k = 1):
         return res,1
 
 
-def find_product_for_pref(val,df,origin, country_groups,db,k = 1):
+def find_product_for_pref(val,df,origin, country_groups,db,k = 1,atm_access = False):
     memberships = list(country_groups.loc[country_groups.member_country == origin,"country_group"].values)
     memberships.append(origin)
 
@@ -585,8 +602,75 @@ def try_from_atm(code,origin,db):
         return None 
     return None
 
+def grab_valid_value(df,column):
+    value = None
+    for val in df.loc[:,column].values:
+        if val == value:
+            pass
+        elif val == "Null":
+            pass
+        elif val == None:
+            pass
 
-def run_scripts(filename):
+        else:
+            value = val
+
+    return val
+
+        
+
+
+
+def compress_product(df):
+    ndf = df.loc[:,['Tull-id', 'Tx dag', 'Varupost antal', 'Deklarationssätt',
+       'Deklarationstyp', 'Transportsätt vid gräns', 'Transportsätt inrikes',
+       'Avsändare', 'Avsändarland', 'Varupost nr', 'Varukod', 'Ursprungsland',
+       'Förfarandekod', 'Förmånskod', 'Statistiskt värde', 'Nettovikt','Tredjelandstullsats', 'Preferenstullsats',
+       'Autonom suspension tullsats',"entity"]].drop_duplicates()
+
+    assert len(ndf) == 1,print(ndf)
+
+    ndf.loc[:,'Importvärde'] = grab_valid_value(df,'Importvärde')  
+    ndf.loc[:,"Avgift tull"] = grab_valid_value(df,'Avgift tull')
+    ndf.loc[:,'Avgift Tilläggstull'] = grab_valid_value(df,'Avgift Tilläggstull')
+    ndf.loc[:,'Avgift Mervärdeskatt'] = grab_valid_value(df,'Avgift Mervärdeskatt')
+    ndf.loc[:,'Avgift Kemikalieskatt'] = grab_valid_value(df,'Avgift Kemikalieskatt')
+    ndf.loc[:,'Sparande preferens'] = grab_valid_value(df,'Sparande preferens')
+    ndf.loc[:,'Sparande autonom suspension'] = grab_valid_value(df,'Sparande autonom suspension')
+    ndf.loc[:,'Sparande IPR'] = grab_valid_value(df,'Sparande IPR')
+    ndf.loc[:,'Potentiellt sparande'] = grab_valid_value(df,'Potentiellt sparande')
+    ndf.loc[:,'Potentiellt fel'] = grab_valid_value(df,'Potentiellt fel')
+    ndf.loc[:,'check'] = grab_valid_value(df,'check')
+
+    return ndf.loc[:,['Tull-id', 'Tx dag', 'Varupost antal', 'Deklarationssätt',
+       'Deklarationstyp', 'Transportsätt vid gräns', 'Transportsätt inrikes',
+       'Avsändare', 'Avsändarland', 'Varupost nr', 'Varukod', 'Ursprungsland',
+       'Förfarandekod', 'Förmånskod', 'Statistiskt värde', 'Nettovikt', 'Importvärde', 'Avgift tull',
+       'Avgift Tilläggstull', 'Avgift Mervärdeskatt', 'Avgift Kemikalieskatt',
+       'Tredjelandstullsats', 'Preferenstullsats',
+       'Autonom suspension tullsats', 'Sparande preferens',
+       'Sparande autonom suspension', 'Sparande IPR', 'Potentiellt sparande',
+       'Potentiellt fel', 'check', 'entity']]
+
+    
+
+
+
+def compress(df):
+    unique_ids = df.loc[:,"Tull-id"].unique()
+    dfs = []
+    for uid in tqdm(unique_ids):
+        sdf = df.loc[df.loc[:,"Tull-id"] == uid,:]
+        unique_numbers = sdf.loc[:,"Varupost nr"].unique()
+        for un in unique_numbers:
+            ssdf = sdf.loc[sdf.loc[:,"Varupost nr"] == un,:]
+            val = compress_product(ssdf)
+            dfs.append(val)
+
+    df = pd.concat(dfs)
+    return df
+
+def run_scripts(filename,atm_access = False):
     #file_suffix = "Systems"
 
     db = DB_connect()
@@ -665,7 +749,7 @@ def run_scripts(filename):
             k = test_file.columns.get_loc("Avgift Tilläggstull")
             test_file.iloc[row,k] = test_file.iloc[row,:].loc["Avgift belopp"]
 
-        if test_file.iloc[row,:].loc["Avgiftsslag"] == "Mervärdeskatt":
+        if test_file.iloc[row,:].loc["Avgiftsslag"] == "Mervärdesskatt":
             k = test_file.columns.get_loc("Avgift Mervärdeskatt")
             test_file.iloc[row,k] = test_file.iloc[row,:].loc["Avgift belopp"]
 
@@ -685,19 +769,18 @@ def run_scripts(filename):
         auto_saving_index = test_file.columns.get_loc("Sparande autonom suspension")
         potential_index = test_file.columns.get_loc("Potentiellt sparande")
         check_index = test_file.columns.get_loc("check")
+        tull_index = test_file.columns.get_loc("Avgift tull")
+        ipr_index = test_file.columns.get_loc("Sparande IPR")
+        forfar_index = test_file.columns.get_loc("Förfarandekod")
 
 
         val = int(test_file.iloc[row,j])
 
-        duty,iterations = find_product(val,df,db,k = 1)
-
-        #assert type(duty) == list, print(test_file.iloc[row,:])
+        duty,iterations = find_product(val,df,db,k = 1,atm_access = atm_access)
 
         if iterations > 1:
             test_file.iloc[row,check_index] = "X"
 
-        #duty = sdf.loc[((sdf.addcode == "2500")  | (sdf.addcode.isna())),"duty"].values
-        #if len(duty) == 1:
         if duty == None:
             
             test_file.iloc[row,k] = None
@@ -706,13 +789,10 @@ def run_scripts(filename):
             test_file.iloc[row,k] = duty[0]
             
 
-        tp,iters_2 = find_product_for_pref(val,df,test_file.iloc[row,origin_index],country_groups,db)  
-        #tp = tp.loc[:,"duty"].values
-
-        #if len(tp) == 1:
-
-        if tp[0] == None:
-            try_from_atm(val,test_file.iloc[row,origin_index],db)
+        tp,iters_2 = find_product_for_pref(val,df,test_file.iloc[row,origin_index],country_groups,db,atm_access = atm_access)  
+        if atm_access:
+            if tp[0] == None:
+                try_from_atm(val,test_file.iloc[row,origin_index],db)
 
         test_file.iloc[row,pref_index] = tp[0]
 
@@ -724,6 +804,14 @@ def run_scripts(filename):
 
         if len(ats) == 1:
             test_file.iloc[row,auto_index] = ats[0]
+
+        if test_file.iloc[row,forfar_index] == "5100":
+            test_file.iloc[row,tull_index] = None
+
+        if test_file.iloc[row,forfar_index] == "4501":
+            if test_file.iloc[row,j] == 8507908090:
+                test_file.iloc[row,ipr] = calc_ipr(test_file.iloc[row,:])
+
 
 
         if test_file.iloc[row,forman_index] == "300":
@@ -738,6 +826,9 @@ def run_scripts(filename):
                 if test_file.iloc[row,origin_index] in fta.country:
                     test_file.iloc[row,potential_index] = calc_forman_savings(test_file.iloc[row,:])
 
+        
+
+
 
 
     test_file = test_file.loc[:,columns]
@@ -748,20 +839,24 @@ def run_scripts(filename):
     
 
 def main_2():
-    files = ["data/statistik_import_2022-01-01_2022-12-31_AB.xlsx",
-    "data/statistik_import_2022-01-01_2022-12-31_ETT.xlsx",
-    "data/statistik_import_2022-01-01_2022-12-31_LABS.xlsx",
-    "data/statistik_import_2022-01-01_2022-12-31_Systems.xlsx"]
+    data_stump = "data/statistik_import_2022-01-01_2022-12-31_"
+    files = ["AB",
+    "ETT",
+    "LABS",
+    "Systems",
+    "Revolt"]
 
     dfs = []
 
     for file_name in files:
-        df = run_scripts(file_name)
-        df.loc[:,"entity"] = file_name
+        
+        df = run_scripts(data_stump + file_name + ".xlsx")
+        df.loc[:,"entity"] ="Northvolt " + file_name
         dfs.append(df)
 
     result_df = pd.concat(dfs)
-    result_df.to_excel("data/test_export_final.xlsx")
+    result_df = compress(result_df)
+    result_df.to_excel("data/test_export_final_2.xlsx")
 
     
 
