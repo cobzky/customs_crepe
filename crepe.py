@@ -582,7 +582,7 @@ class DB_connect:
 
         con.commit()
 
-def try_from_atm(code,origin,db):
+def try_from_atm(code,origin,db,name = "Tariff preference"):
     tf = TariffData([code],[origin],"SE")
 
     res,error = tf.get_data(get_recursive = False)
@@ -591,14 +591,14 @@ def try_from_atm(code,origin,db):
 
     try:
 
-        res = res.loc[res.loc[:,"type"] == "Tariff preference",:]
+        res = res.loc[res.loc[:,"type"] == name,:]
         if len(res) > 0:
             duty = res.loc[:,"tariffFormula"].values[0]
             end_date = res.loc[:,"endDate"].values[0]
-            db.write(code,origin,"Tariff preference",duty,end_date)
+            db.write(code,origin,name,duty,end_date)
             return duty
     except Exception as e:
-        db.write(code,origin,"Tariff preference",None,None)
+        db.write(code,origin,name,None,None)
         return None 
     return None
 
@@ -772,6 +772,7 @@ def run_scripts(filename,atm_access = False):
         tull_index = test_file.columns.get_loc("Avgift tull")
         ipr_index = test_file.columns.get_loc("Sparande IPR")
         forfar_index = test_file.columns.get_loc("Förfarandekod")
+        ats_index = test_file.columns.get_loc("Autonom suspension tullsats")
 
 
         val = int(test_file.iloc[row,j])
@@ -808,7 +809,7 @@ def run_scripts(filename,atm_access = False):
         if test_file.iloc[row,forfar_index] == "5100":
             test_file.iloc[row,tull_index] = None
 
-        if test_file.iloc[row,forfar_index] == "4501":
+        if test_file.iloc[row,forfar_index] == "4051":
             if test_file.iloc[row,j] == 8507908090:
                 test_file.iloc[row,ipr] = calc_ipr(test_file.iloc[row,:])
 
@@ -816,8 +817,11 @@ def run_scripts(filename,atm_access = False):
 
         if test_file.iloc[row,forman_index] == "300":
              test_file.iloc[row,sparande_index] = calc_forman_savings(test_file.iloc[row,:])
+             
 
         if test_file.iloc[row,forman_index] == "110":
+             
+             test_file.iloc[row,ats_index] = try_from_atm(val,test_file.iloc[row,origin_index],db,"Autonomous tariff suspension")
              test_file.iloc[row,auto_saving_index] = calc_auto_savings(test_file.iloc[row,:])
 
 
