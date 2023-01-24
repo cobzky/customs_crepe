@@ -316,7 +316,7 @@ def get_tariffs(df1):
     
 
     result.loc[:,"merge_id"] = result.product_id + result.country_of_origin
-    result = result.loc[:,result.loc[:,"type"] == "Thrid country duty"]
+    result = result.loc[:,result.loc[:,"type"] == "Third country duty"]
 
     result.loc[:,"tariffFormula"] = [float(x.replace("%",""))/100 for x in result.tariffFormula]
     
@@ -414,33 +414,37 @@ def fix_code(x):
 
 
 def calc_forman_savings(row):
-    third = row.Tredjelandstullsats
-    pref = row.Preferenstullsats
-    val = row.loc["Statistiskt värde"]
+    try:
+        third = row.Tredjelandstullsats
+        pref = row.Preferenstullsats
+        val = row.loc["Statistiskt värde"]
 
-    if third == None:
-        third = 0
-    else:
-        third = float(third.replace(" ","").replace("%",""))/100
+        if third == None:
+            third = 0
+        else:
+            third = float(third.replace(" ","").replace("%",""))/100
 
-    if pref == None:
-        pref = 0
+        if pref == None:
+            pref = 0
 
-    elif pref == "None":
-        pref = 0
+        elif pref == "None":
+            pref = 0
 
-    else:
-        pref = float(pref.replace(" ","").replace("%",""))/100
+        else:
+            pref = float(pref.replace(" ","").replace("%",""))/100
 
-    if val == None:
-        val = 0
+        if val == None:
+            val = 0
 
-    else:
-        val = float(val)
+        else:
+            val = float(val)
 
     
     
-    return val*(third - pref)
+        return val*(third - pref)
+
+    except:
+        return 0
 
 def calc_ipr(row):
     third = row.Tredjelandstullsats
@@ -456,7 +460,7 @@ def calc_ipr(row):
     else:
         val = float(val)
 
-    return (0.05 - thrid)*val
+    return (0.05 - third)*val
 
 
 def calc_auto_savings(row):
@@ -626,7 +630,7 @@ def compress_product(df):
        'Deklarationstyp', 'Transportsätt vid gräns', 'Transportsätt inrikes',
        'Avsändare', 'Avsändarland', 'Varupost nr', 'Varukod', 'Ursprungsland',
        'Förfarandekod', 'Förmånskod', 'Statistiskt värde', 'Nettovikt','Tredjelandstullsats', 'Preferenstullsats',
-       'Autonom suspension tullsats',"entity"]].drop_duplicates()
+       "entity"]].drop_duplicates()
 
     assert len(ndf) == 1,print(ndf)
 
@@ -640,6 +644,7 @@ def compress_product(df):
     ndf.loc[:,'Sparande IPR'] = grab_valid_value(df,'Sparande IPR')
     ndf.loc[:,'Potentiellt sparande'] = grab_valid_value(df,'Potentiellt sparande')
     ndf.loc[:,'Potentiellt fel'] = grab_valid_value(df,'Potentiellt fel')
+    ndf.loc[:,"Autonom suspension tullsats"] = grab_valid_value(df,'Autonom suspension tullsats')
     ndf.loc[:,'check'] = grab_valid_value(df,'check')
 
     return ndf.loc[:,['Tull-id', 'Tx dag', 'Varupost antal', 'Deklarationssätt',
@@ -676,6 +681,10 @@ def run_scripts(filename,atm_access = False):
     db = DB_connect()
     db.check_database()
     db.test_read()
+
+    cd = CountryData(output_type = "sql")
+    cd.grab_country_info()
+    eu_countries = cd.country_data.loc[cd.country_data.memberState == True,:].code.values
 
 
 
@@ -726,8 +735,8 @@ def run_scripts(filename,atm_access = False):
     columns = ["Tull-id","Tx dag","Varupost antal","Deklarationssätt","Deklarationstyp","Transportsätt vid gräns",
     "Transportsätt inrikes","Avsändare","Avsändarland","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
     "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
-    "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Tredjelandstullsats","Preferenstullsats",
-    "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Potentiellt sparande","Potentiellt fel","check"]
+    "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Avgift total","Tredjelandstullsats","Preferenstullsats",
+    "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Sparande total","Potentiellt sparande","Potentiellt fel","check"]
     
 
     n = len(test_file)
@@ -810,8 +819,8 @@ def run_scripts(filename,atm_access = False):
             test_file.iloc[row,tull_index] = None
 
         if test_file.iloc[row,forfar_index] == "4051":
-            if test_file.iloc[row,j] == 8507908090:
-                test_file.iloc[row,ipr] = calc_ipr(test_file.iloc[row,:])
+            #if test_file.iloc[row,j] == 8507908090:
+            test_file.iloc[row,ipr_index] = calc_ipr(test_file.iloc[row,:])
 
 
 
@@ -827,13 +836,18 @@ def run_scripts(filename,atm_access = False):
 
         if test_file.iloc[row,:].loc["Avgiftsslag"] == "Tull":
             if test_file.iloc[row,forman_index] != "300":
-                if test_file.iloc[row,origin_index] in fta.country:
+                if (test_file.iloc[row,origin_index] in list(fta.country.values)) or (test_file.iloc[row,origin_index] in list(eu_countries)):
+
                     test_file.iloc[row,potential_index] = calc_forman_savings(test_file.iloc[row,:])
 
         
 
 
+    			
 
+    test_file.loc[:,"Avgift total"] = test_file.loc[:,"Avgift tull"] + test_file.loc[:,"Avgift Tilläggstull"] +test_file.loc[:,"Avgift Mervärdeskatt"] + test_file.loc[:,"Avgift Kemikalieskatt"]	
+
+    test_file.loc[:,"Sparande total"] = test_file.loc[:,"Sparande preferens"] + test_file.loc[:,"Sparande autonom suspension"]+ test_file.loc[:,"Sparande IPR"]
 
     test_file = test_file.loc[:,columns]
 
@@ -843,6 +857,12 @@ def run_scripts(filename,atm_access = False):
     
 
 def main_2():
+    columns = ["Entity","Tull-id","Tx dag","Varupost antal","Deklarationssätt","Deklarationstyp","Transportsätt vid gräns",
+    "Transportsätt inrikes","Avsändare","Avsändarland","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
+    "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
+    "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Avgift total","Tredjelandstullsats","Preferenstullsats",
+    "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Sparande total","Potentiellt sparande","Potentiellt fel","check"]
+    
     data_stump = "data/statistik_import_2022-01-01_2022-12-31_"
     files = ["AB",
     "ETT",
@@ -855,12 +875,15 @@ def main_2():
     for file_name in files:
         
         df = run_scripts(data_stump + file_name + ".xlsx")
-        df.loc[:,"entity"] ="Northvolt " + file_name
+        df.loc[:,"Entity"] ="Northvolt " + file_name
         dfs.append(df)
 
+    
+
     result_df = pd.concat(dfs)
+    result_df = result_df.loc[:,columns]
     result_df = compress(result_df)
-    result_df.to_excel("data/test_export_final_2.xlsx")
+    result_df.to_excel("data/test_export_final_3.xlsx")
 
     
 
