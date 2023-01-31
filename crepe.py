@@ -630,7 +630,7 @@ def compress_product(df):
        'Deklarationstyp', 'Transportsätt vid gräns', 'Transportsätt inrikes',
        'Avsändare', 'Avsändarland', 'Varupost nr', 'Varukod', 'Ursprungsland',
        'Förfarandekod', 'Förmånskod', 'Statistiskt värde', 'Nettovikt','Tredjelandstullsats', 'Preferenstullsats',
-       "entity"]].drop_duplicates()
+       "Entity","Avsändarland_","Lev_vilkor","varubeskrivning"]].drop_duplicates()
 
     assert len(ndf) == 1,print(ndf)
 
@@ -647,6 +647,7 @@ def compress_product(df):
     ndf.loc[:,"Autonom suspension tullsats"] = grab_valid_value(df,'Autonom suspension tullsats')
     ndf.loc[:,'check'] = grab_valid_value(df,'check')
 
+
     return ndf.loc[:,['Tull-id', 'Tx dag', 'Varupost antal', 'Deklarationssätt',
        'Deklarationstyp', 'Transportsätt vid gräns', 'Transportsätt inrikes',
        'Avsändare', 'Avsändarland', 'Varupost nr', 'Varukod', 'Ursprungsland',
@@ -655,7 +656,7 @@ def compress_product(df):
        'Tredjelandstullsats', 'Preferenstullsats',
        'Autonom suspension tullsats', 'Sparande preferens',
        'Sparande autonom suspension', 'Sparande IPR', 'Potentiellt sparande',
-       'Potentiellt fel', 'check', 'entity']]
+       'Potentiellt fel', 'check', 'Entity',"Avsändarland_","Lev_vilkor","varubeskrivning"]]
 
     
 
@@ -861,7 +862,8 @@ def main_2():
     "Transportsätt inrikes","Avsändare","Avsändarland","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
     "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
     "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Avgift total","Tredjelandstullsats","Preferenstullsats",
-    "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Sparande total","Potentiellt sparande","Potentiellt fel","check"]
+    "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Sparande total","Potentiellt sparande","Potentiellt fel","check",
+    "Avsändarland_","Lev_vilkor","varubeskrivning"]
     
     data_stump = "data/statistik_import_2022-01-01_2022-12-31_"
     files = ["AB",
@@ -870,12 +872,45 @@ def main_2():
     "Systems",
     "Revolt"]
 
+
     dfs = []
+
+    #data_stump_details = "data/Detaljer - linje_dokument_avgift (NorthVolt {}).csv"
+
+    #for file_name in detail_files:
+    #    df = pd.read_csv(data_stump_details.format(file_name),sep = ";")
+    #    print(df)
+
+    #df = pd.read_excel("data/emma_ab.xlsx")
+
+    #df = df.loc[:,["Tollnummer","Landkode","Levvilk.","Varebeskrivelse","Tariffnr."]]
+
+    #df = df.rename(columns = {"Tollnummer":"Tull-id","Tariffnr.":"Varukod","Landkode":"Avsändarland_","Levvilk.":"Lev_vilkor",
+    #"Varebeskrivelse":"varubeskrivning"})
+
+    #final_result = pd.read_excel("data/test_export_final_2.xlsx")
+   
+    #print(df)
+    #print(final_result)
+
+
+    #final_result = final_result.merge(df,how = "left",on = ["Tull-id","Varukod"])
+
+    #print(final_result)
 
     for file_name in files:
         
         df = run_scripts(data_stump + file_name + ".xlsx")
         df.loc[:,"Entity"] ="Northvolt " + file_name
+        emma_df = pd.read_excel("data/emma_{}.xlsx".format(file_name))
+        emma_df = emma_df.loc[:,["Tollnummer","Landkode","Levvilk.","Varebeskrivelse","Tariffnr."]]
+        emma_df = emma_df.rename(columns = {"Tollnummer":"Tull-id","Tariffnr.":"Varukod","Landkode":"Avsändarland_","Levvilk.":"Lev_vilkor",
+    "Varebeskrivelse":"varubeskrivning"})
+
+        emma_df.loc[:,"Varukod"] = [str(x) for x in emma_df.Varukod]
+
+        df = df.merge(emma_df,how = "left",on = ["Tull-id","Varukod"])
+
         dfs.append(df)
 
     
@@ -883,7 +918,7 @@ def main_2():
     result_df = pd.concat(dfs)
     result_df = result_df.loc[:,columns]
     result_df = compress(result_df)
-    result_df.to_excel("data/test_export_final_3.xlsx")
+    result_df.to_excel("data/test_export_final_4.xlsx")
 
     
 
