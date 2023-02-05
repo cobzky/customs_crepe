@@ -622,15 +622,22 @@ def grab_valid_value(df,column):
     return val
 
         
+def grab_longest_description(df):
+    descr = ""
+    for val in df.loc[:,"varubeskrivning"].values:
+        if len(str(val)) > len(descr):
+            descr = str(val)
+    return descr
+
 
 
 
 def compress_product(df):
     ndf = df.loc[:,['Tull-id', 'Tx dag', 'Varupost antal', 'Deklarationssätt',
        'Deklarationstyp', 'Transportsätt vid gräns', 'Transportsätt inrikes',
-       'Avsändare', 'Avsändarland', 'Varupost nr', 'Varukod', 'Ursprungsland',
+       'Avsändare', 'Varupost nr', 'Varukod', 'Ursprungsland',
        'Förfarandekod', 'Förmånskod', 'Statistiskt värde', 'Nettovikt','Tredjelandstullsats', 'Preferenstullsats',
-       "Entity","Avsändarland_","Lev_vilkor","varubeskrivning"]].drop_duplicates()
+       "Entity","Avsändarland","Incoterms"]].drop_duplicates()
 
     assert len(ndf) == 1,print(ndf)
 
@@ -646,17 +653,18 @@ def compress_product(df):
     ndf.loc[:,'Potentiellt fel'] = grab_valid_value(df,'Potentiellt fel')
     ndf.loc[:,"Autonom suspension tullsats"] = grab_valid_value(df,'Autonom suspension tullsats')
     ndf.loc[:,'check'] = grab_valid_value(df,'check')
+    ndf.loc[:,"varubeskrivning"] = grab_longest_description(df)
 
 
     return ndf.loc[:,['Tull-id', 'Tx dag', 'Varupost antal', 'Deklarationssätt',
        'Deklarationstyp', 'Transportsätt vid gräns', 'Transportsätt inrikes',
-       'Avsändare', 'Avsändarland', 'Varupost nr', 'Varukod', 'Ursprungsland',
+       'Avsändare', 'Varupost nr', 'Varukod', 'Ursprungsland',
        'Förfarandekod', 'Förmånskod', 'Statistiskt värde', 'Nettovikt', 'Importvärde', 'Avgift tull',
        'Avgift Tilläggstull', 'Avgift Mervärdeskatt', 'Avgift Kemikalieskatt',
        'Tredjelandstullsats', 'Preferenstullsats',
        'Autonom suspension tullsats', 'Sparande preferens',
        'Sparande autonom suspension', 'Sparande IPR', 'Potentiellt sparande',
-       'Potentiellt fel', 'check', 'Entity',"Avsändarland_","Lev_vilkor","varubeskrivning"]]
+       'Potentiellt fel', 'check', 'Entity',"Avsändarland","Incoterms","varubeskrivning"]]
 
     
 
@@ -681,11 +689,15 @@ def run_scripts(filename,atm_access = False):
 
     db = DB_connect()
     db.check_database()
-    db.test_read()
+    #db.test_read()
+    try:
+        eu_countries = pickle.load(open("eu_countries.p","rb"))
+    except:
 
-    cd = CountryData(output_type = "sql")
-    cd.grab_country_info()
-    eu_countries = cd.country_data.loc[cd.country_data.memberState == True,:].code.values
+        cd = CountryData(output_type = "sql")
+        cd.grab_country_info()
+        eu_countries = cd.country_data.loc[cd.country_data.memberState == True,:].code.values
+        pickle.dump(eu_countries,open("eu_countries.p","wb"))
 
 
 
@@ -743,10 +755,6 @@ def run_scripts(filename,atm_access = False):
     n = len(test_file)
     #n = 300
     for row in tqdm(range(n)):
-        if test_file.iloc[row,:].loc["Avsändare"][-3:] == " AS":
-            k = test_file.columns.get_loc("Avsändarland")
-            test_file.iloc[row,k] = "Norge"
-
         if test_file.iloc[row,:].loc["Avgiftsslag"] == "Monetärt tullvärde":
             k = test_file.columns.get_loc("Importvärde")
             test_file.iloc[row,k] = test_file.iloc[row,:].loc["Statistiskt värde"]
@@ -856,14 +864,16 @@ def run_scripts(filename,atm_access = False):
 
     test_file.to_excel("test_export.xlsx")
     
+def remove_trailing_zeroes(x):
+    return x.split(".")[0].replace(" ","")
 
 def main_2():
     columns = ["Entity","Tull-id","Tx dag","Varupost antal","Deklarationssätt","Deklarationstyp","Transportsätt vid gräns",
-    "Transportsätt inrikes","Avsändare","Avsändarland","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
+    "Transportsätt inrikes","Avsändare","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
     "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
     "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Avgift total","Tredjelandstullsats","Preferenstullsats",
     "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Sparande total","Potentiellt sparande","Potentiellt fel","check",
-    "Avsändarland_","Lev_vilkor","varubeskrivning"]
+    "Avsändarland","Incoterms","varubeskrivning"]
     
     data_stump = "data/statistik_import_2022-01-01_2022-12-31_"
     files = ["AB",
@@ -898,18 +908,26 @@ def main_2():
 
     #print(final_result)
 
+    emma_dfs = []
+
     for file_name in files:
         
         df = run_scripts(data_stump + file_name + ".xlsx")
         df.loc[:,"Entity"] ="Northvolt " + file_name
+        df.loc[:,"Varukod"] = [x.replace(" ","") for x in df.Varukod]
         emma_df = pd.read_excel("data/emma_{}.xlsx".format(file_name))
         emma_df = emma_df.loc[:,["Tollnummer","Landkode","Levvilk.","Varebeskrivelse","Tariffnr."]]
-        emma_df = emma_df.rename(columns = {"Tollnummer":"Tull-id","Tariffnr.":"Varukod","Landkode":"Avsändarland_","Levvilk.":"Lev_vilkor",
+        emma_df = emma_df.rename(columns = {"Tollnummer":"Tull-id","Tariffnr.":"Varukod","Landkode":"Avsändarland",
+        "Levvilk.":"Incoterms",
     "Varebeskrivelse":"varubeskrivning"})
 
-        emma_df.loc[:,"Varukod"] = [str(x) for x in emma_df.Varukod]
+        emma_df.loc[:,"Varukod"] = [remove_trailing_zeroes(str(x)) for x in emma_df.Varukod]
 
-        df = df.merge(emma_df,how = "left",on = ["Tull-id","Varukod"])
+        emma_dfs.append(emma_df)
+
+        df = df.merge(emma_df,how = "left",left_on = ["Tull-id","Varukod"],right_on =  ["Tull-id","Varukod"] )
+
+
 
         dfs.append(df)
 
@@ -918,7 +936,12 @@ def main_2():
     result_df = pd.concat(dfs)
     result_df = result_df.loc[:,columns]
     result_df = compress(result_df)
+    result_df = result_df.loc[:,columns]
     result_df.to_excel("data/test_export_final_4.xlsx")
+
+
+    emmadf = pd.concat(emma_dfs)
+    emmadf.to_excel("data/emma_total.xlsx")
 
     
 
