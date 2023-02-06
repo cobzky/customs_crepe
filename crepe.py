@@ -8,6 +8,14 @@ from time import sleep
 from random import random
 import pickle
 from datetime import datetime,timedelta
+import os
+
+"""
+TODO:
+    Update input file for tariffs
+    Fix so that first time if finds tariff, it doesent give it %
+    
+"""
 
 class CountryData:
     """
@@ -460,7 +468,7 @@ def calc_ipr(row):
     else:
         val = float(val)
 
-    return (0.05 - third)*val
+    return (0.055 - third)*val
 
 
 def calc_auto_savings(row):
@@ -646,27 +654,37 @@ def compress_product(df):
     ndf.loc[:,'Avgift Tilläggstull'] = grab_valid_value(df,'Avgift Tilläggstull')
     ndf.loc[:,'Avgift Mervärdeskatt'] = grab_valid_value(df,'Avgift Mervärdeskatt')
     ndf.loc[:,'Avgift Kemikalieskatt'] = grab_valid_value(df,'Avgift Kemikalieskatt')
+    ndf.loc[:,"Avgift total"] = grab_valid_value(df,"Avgift total")
     ndf.loc[:,'Sparande preferens'] = grab_valid_value(df,'Sparande preferens')
     ndf.loc[:,'Sparande autonom suspension'] = grab_valid_value(df,'Sparande autonom suspension')
     ndf.loc[:,'Sparande IPR'] = grab_valid_value(df,'Sparande IPR')
     ndf.loc[:,'Potentiellt sparande'] = grab_valid_value(df,'Potentiellt sparande')
+    ndf.loc[:,"Sparande total"] = grab_valid_value(df,"Sparande total")
     ndf.loc[:,'Potentiellt fel'] = grab_valid_value(df,'Potentiellt fel')
     ndf.loc[:,"Autonom suspension tullsats"] = grab_valid_value(df,'Autonom suspension tullsats')
     ndf.loc[:,'check'] = grab_valid_value(df,'check')
     ndf.loc[:,"varubeskrivning"] = grab_longest_description(df)
 
 
+
     return ndf.loc[:,['Tull-id', 'Tx dag', 'Varupost antal', 'Deklarationssätt',
        'Deklarationstyp', 'Transportsätt vid gräns', 'Transportsätt inrikes',
        'Avsändare', 'Varupost nr', 'Varukod', 'Ursprungsland',
        'Förfarandekod', 'Förmånskod', 'Statistiskt värde', 'Nettovikt', 'Importvärde', 'Avgift tull',
-       'Avgift Tilläggstull', 'Avgift Mervärdeskatt', 'Avgift Kemikalieskatt',
+       'Avgift Tilläggstull', 'Avgift Mervärdeskatt', 'Avgift Kemikalieskatt',"Avgift total",
        'Tredjelandstullsats', 'Preferenstullsats',
        'Autonom suspension tullsats', 'Sparande preferens',
-       'Sparande autonom suspension', 'Sparande IPR', 'Potentiellt sparande',
+       'Sparande autonom suspension', 'Sparande IPR', 'Potentiellt sparande',"Sparande total",
        'Potentiellt fel', 'check', 'Entity',"Avsändarland","Incoterms","varubeskrivning"]]
 
-    
+
+def test_easpring(val):
+    assert type(val) == str, "Type aint string its {}".format(type(val))
+    val = val.lower().split(" ")
+    if "easpring" in val:
+        return True
+    else:
+        return False   
 
 
 
@@ -685,7 +703,6 @@ def compress(df):
     return df
 
 def run_scripts(filename,atm_access = False):
-    #file_suffix = "Systems"
 
     db = DB_connect()
     db.check_database()
@@ -715,7 +732,6 @@ def run_scripts(filename,atm_access = False):
     df.loc[:,"goodscode"] = [str(x) for x in df.goodscode]
 
     df.loc[:,"goodscode"] = df.goodscode.apply(lambda x : fix_code(x))
-    #filename = "data/statistik_import_2022-01-01_2022-12-31_AB.xlsx"
     imp = ImportFile(filename,header = 0)
     imp.load_file()
     test_file = imp.input_file
@@ -723,7 +739,6 @@ def run_scripts(filename,atm_access = False):
     
 
     
-    test_file.loc[:,"Avsändarland"] = None
     test_file.loc[:,"Importvärde"] = None
     test_file.loc[:,"Avgift tull"] = None
 
@@ -746,7 +761,7 @@ def run_scripts(filename,atm_access = False):
 
 
     columns = ["Tull-id","Tx dag","Varupost antal","Deklarationssätt","Deklarationstyp","Transportsätt vid gräns",
-    "Transportsätt inrikes","Avsändare","Avsändarland","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
+    "Transportsätt inrikes","Avsändare","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
     "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
     "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Avgift total","Tredjelandstullsats","Preferenstullsats",
     "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Sparande total","Potentiellt sparande","Potentiellt fel","check"]
@@ -791,6 +806,8 @@ def run_scripts(filename,atm_access = False):
         ipr_index = test_file.columns.get_loc("Sparande IPR")
         forfar_index = test_file.columns.get_loc("Förfarandekod")
         ats_index = test_file.columns.get_loc("Autonom suspension tullsats")
+        avsandar_index = test_file.columns.get_loc("Avsändare")
+        ursprung_index = test_file.columns.get_loc("Ursprungsland")
 
 
         val = int(test_file.iloc[row,j])
@@ -827,6 +844,13 @@ def run_scripts(filename,atm_access = False):
         if test_file.iloc[row,forfar_index] == "5100":
             test_file.iloc[row,tull_index] = None
 
+        if test_easpring(test_file.iloc[row,avsandar_index]):
+            if test_file.iloc[row,ursprung_index] == "CN":
+                if test_file.iloc[row,forfar_index] == "4000":
+                    test_file.iloc[row,tull_index] = None
+
+        
+
         if test_file.iloc[row,forfar_index] == "4051":
             #if test_file.iloc[row,j] == 8507908090:
             test_file.iloc[row,ipr_index] = calc_ipr(test_file.iloc[row,:])
@@ -846,8 +870,8 @@ def run_scripts(filename,atm_access = False):
         if test_file.iloc[row,:].loc["Avgiftsslag"] == "Tull":
             if test_file.iloc[row,forman_index] != "300":
                 if (test_file.iloc[row,origin_index] in list(fta.country.values)) or (test_file.iloc[row,origin_index] in list(eu_countries)):
-
-                    test_file.iloc[row,potential_index] = calc_forman_savings(test_file.iloc[row,:])
+                    if test_file.iloc[row,forfar_index] != "4051":
+                        test_file.iloc[row,potential_index] = calc_forman_savings(test_file.iloc[row,:])
 
         
 
@@ -867,55 +891,74 @@ def run_scripts(filename,atm_access = False):
 def remove_trailing_zeroes(x):
     return x.split(".")[0].replace(" ","")
 
+def same_country(row):
+    if row.loc["Avsändarland"] == row.loc["Ursprungsland"]:
+        return "X"
+    else:
+        return None
+
+def find_file_path(file_type,entity,files):
+    assert file_type in ["emma","tull"],"No"
+
+    if file_type == "emma":
+        for f in files:
+            if "Detaljer" in f.split(" "):
+                if entity.lower() in f.split(" ")[4].lower():   
+                    return f
+
+    if file_type == "tull":
+        for f in files:
+            if "statistik" in f.split("_"):
+
+                if entity.lower() in f.split("_")[-1].lower()
+                    return f
+
 def main_2():
+    month = "jan"
     columns = ["Entity","Tull-id","Tx dag","Varupost antal","Deklarationssätt","Deklarationstyp","Transportsätt vid gräns",
     "Transportsätt inrikes","Avsändare","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
     "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
     "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Avgift total","Tredjelandstullsats","Preferenstullsats",
     "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Sparande total","Potentiellt sparande","Potentiellt fel","check",
     "Avsändarland","Incoterms","varubeskrivning"]
+
+    columns_2 = ["Entity","Tull-id","Tx dag","Varupost antal","Deklarationssätt","Deklarationstyp","Transportsätt vid gräns",
+    "Transportsätt inrikes","Avsändare","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
+    "Förmånskod","Statistiskt värde","Nettovikt","Importvärde","Avgift tull","Avgift Tilläggstull",
+    "Avgift Mervärdeskatt","Avgift Kemikalieskatt","Avgift total","Tredjelandstullsats","Preferenstullsats",
+    "Autonom suspension tullsats","Sparande preferens","Sparande autonom suspension","Sparande IPR","Sparande total","Potentiellt sparande","Potentiellt fel","check",
+    "Avsändarland","Incoterms","varubeskrivning"]
     
-    data_stump = "data/statistik_import_2022-01-01_2022-12-31_"
-    files = ["AB",
+    files_subs = ["AB",
     "ETT",
     "LABS",
-    "Systems",
+    "Battery",
     "Revolt"]
 
 
     dfs = []
 
-    #data_stump_details = "data/Detaljer - linje_dokument_avgift (NorthVolt {}).csv"
-
-    #for file_name in detail_files:
-    #    df = pd.read_csv(data_stump_details.format(file_name),sep = ";")
-    #    print(df)
-
-    #df = pd.read_excel("data/emma_ab.xlsx")
-
-    #df = df.loc[:,["Tollnummer","Landkode","Levvilk.","Varebeskrivelse","Tariffnr."]]
-
-    #df = df.rename(columns = {"Tollnummer":"Tull-id","Tariffnr.":"Varukod","Landkode":"Avsändarland_","Levvilk.":"Lev_vilkor",
-    #"Varebeskrivelse":"varubeskrivning"})
-
-    #final_result = pd.read_excel("data/test_export_final_2.xlsx")
-   
-    #print(df)
-    #print(final_result)
-
-
-    #final_result = final_result.merge(df,how = "left",on = ["Tull-id","Varukod"])
-
-    #print(final_result)
-
     emma_dfs = []
 
-    for file_name in files:
+    for file_name in files_subs:
+        path = os.getcwd()
+        found_files = os.listdir(path + "\data\Jan_23")
+        assert len(found_files) > 0, "No files found"
+
+        core_file = find_file_path("tull",file_name,found_files)
+
+        print(core_file)
         
-        df = run_scripts(data_stump + file_name + ".xlsx")
-        df.loc[:,"Entity"] ="Northvolt " + file_name
+        df = run_scripts("data/Jan_23/" + core_file)
+        if file_name == "Battery":
+            file_sub = "Systems"
+        else:
+            file_sub = file_name 
+        df.loc[:,"Entity"] ="Northvolt " + file_sub
         df.loc[:,"Varukod"] = [x.replace(" ","") for x in df.Varukod]
-        emma_df = pd.read_excel("data/emma_{}.xlsx".format(file_name))
+
+        emma_file = find_file_path("emma",file_name,found_files)
+        emma_df = pd.read_excel("data/Jan_23/" + emma_file,header = 1)
         emma_df = emma_df.loc[:,["Tollnummer","Landkode","Levvilk.","Varebeskrivelse","Tariffnr."]]
         emma_df = emma_df.rename(columns = {"Tollnummer":"Tull-id","Tariffnr.":"Varukod","Landkode":"Avsändarland",
         "Levvilk.":"Incoterms",
@@ -936,8 +979,21 @@ def main_2():
     result_df = pd.concat(dfs)
     result_df = result_df.loc[:,columns]
     result_df = compress(result_df)
-    result_df = result_df.loc[:,columns]
-    result_df.to_excel("data/test_export_final_4.xlsx")
+    result_df = result_df.loc[:,columns_2]
+    result_df.to_excel("data/Results/test_export_final_{}.xlsx".format(month))
+
+    potential_savings = result_df.loc[result_df.loc[:,"Potentiellt sparande"].isna() == False,["Entity","Tx dag","Tull-id",
+    "Ursprungsland","Avsändarland","Avsändare","Potentiellt sparande"]]
+    potential_savings.loc[:,"Samma land"] = None
+
+    same_country_list = []
+
+    for i in range(len(potential_savings)):
+        same_country_list.append(same_country(potential_savings.iloc[i,:]))
+
+    potential_savings.loc[:,"Samma land"] = same_country_list
+
+    potential_savings.to_excel("data/Results/potential_savings_{}.xlsx".format(month))
 
 
     emmadf = pd.concat(emma_dfs)
