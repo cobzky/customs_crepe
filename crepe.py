@@ -14,7 +14,9 @@ import os
 TODO:
     Update input file for tariffs
     Fix so that first time if finds tariff, it doesent give it %
+    Fix imports and outputs for old structure, and make month a dynamic parameter
     
+
 """
 
 class CountryData:
