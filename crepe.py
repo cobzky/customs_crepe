@@ -9,13 +9,14 @@ from random import random
 import pickle
 from datetime import datetime,timedelta
 import os
+import math
 
 """
 TODO:
     Update input file for tariffs
     Fix so that first time if finds tariff, it doesent give it %
     Fix imports and outputs for old structure, and make month a dynamic parameter
-    
+
 
 """
 
@@ -617,19 +618,42 @@ def try_from_atm(code,origin,db,name = "Tariff preference"):
     return None
 
 def grab_valid_value(df,column):
-    value = None
-    for val in df.loc[:,column].values:
-        if val == value:
-            pass
-        elif val == "Null":
-            pass
-        elif val == None:
-            pass
+    
+    if df.loc[:,column].dtype == float:
+        
+        value = np.nan
+        for val in df.loc[:,column].tolist():
+            if value == value:
+                pass
+            elif math.isnan(val):
+                pass
+            else:
+                value = val
 
-        else:
-            value = val
+    elif df.loc[:,column].dtype == object:
+        
+        value = None
 
-    return val
+        for val in df.loc[:,column].tolist():
+        
+
+            if val == value:
+                pass
+            elif val == "Null":
+                pass
+            elif val == None:
+                pass
+            else:
+                value = val
+    else:
+        assert False, "Something was missed"
+    
+    return value
+
+def grab_sum(df,column):
+    print(df.loc[:,column])
+    print(df.loc[:,column].dtype)
+    return df.loc[:,column].sum(skipna = True)
 
         
 def grab_longest_description(df):
@@ -640,6 +664,12 @@ def grab_longest_description(df):
     return descr
 
 
+def if_na_zero(val):
+    if val.values == None:
+        
+        return 0
+    else:
+        return val
 
 
 def compress_product(df):
@@ -656,16 +686,20 @@ def compress_product(df):
     ndf.loc[:,'Avgift Tilläggstull'] = grab_valid_value(df,'Avgift Tilläggstull')
     ndf.loc[:,'Avgift Mervärdeskatt'] = grab_valid_value(df,'Avgift Mervärdeskatt')
     ndf.loc[:,'Avgift Kemikalieskatt'] = grab_valid_value(df,'Avgift Kemikalieskatt')
-    ndf.loc[:,"Avgift total"] = grab_valid_value(df,"Avgift total")
+    #ndf.loc[:,"Avgift total"] = grab_sum(df,"Avgift total")
     ndf.loc[:,'Sparande preferens'] = grab_valid_value(df,'Sparande preferens')
     ndf.loc[:,'Sparande autonom suspension'] = grab_valid_value(df,'Sparande autonom suspension')
     ndf.loc[:,'Sparande IPR'] = grab_valid_value(df,'Sparande IPR')
     ndf.loc[:,'Potentiellt sparande'] = grab_valid_value(df,'Potentiellt sparande')
-    ndf.loc[:,"Sparande total"] = grab_valid_value(df,"Sparande total")
+    #ndf.loc[:,"Sparande total"] = grab_sum(df,"Sparande total")
     ndf.loc[:,'Potentiellt fel'] = grab_valid_value(df,'Potentiellt fel')
     ndf.loc[:,"Autonom suspension tullsats"] = grab_valid_value(df,'Autonom suspension tullsats')
     ndf.loc[:,'check'] = grab_valid_value(df,'check')
     ndf.loc[:,"varubeskrivning"] = grab_longest_description(df)
+    ndf.loc[:,"Avgift total"] = if_na_zero(ndf.loc[:,"Avgift tull"]) + if_na_zero(ndf.loc[:,"Avgift Tilläggstull"]) +if_na_zero(ndf.loc[:,"Avgift Mervärdeskatt"]) + if_na_zero(ndf.loc[:,"Avgift Kemikalieskatt"])	
+
+    ndf.loc[:,"Sparande total"] = if_na_zero(ndf.loc[:,"Sparande preferens"]) + if_na_zero(ndf.loc[:,"Sparande autonom suspension"])+ if_na_zero(ndf.loc[:,"Sparande IPR"])
+
 
 
 
@@ -912,11 +946,17 @@ def find_file_path(file_type,entity,files):
         for f in files:
             if "statistik" in f.split("_"):
 
-                if entity.lower() in f.split("_")[-1].lower()
+                if entity.lower() in f.split("_")[-1].lower():
                     return f
 
 def main_2():
+    month = "full_year"
+    folder_name = "Year_22"
+    
     month = "jan"
+    folder_name = "Jan_23"
+    #header_row = 0
+    header_row = 1
     columns = ["Entity","Tull-id","Tx dag","Varupost antal","Deklarationssätt","Deklarationstyp","Transportsätt vid gräns",
     "Transportsätt inrikes","Avsändare","Varupost nr","Varukod","Ursprungsland","Förfarandekod",
     "Förmånskod","Statistiskt värde","Nettovikt","Löpnr","Avgiftsslag","Importvärde","Avgift tull","Avgift Tilläggstull",
@@ -942,16 +982,18 @@ def main_2():
 
     emma_dfs = []
 
+    
+
     for file_name in files_subs:
         path = os.getcwd()
-        found_files = os.listdir(path + "\data\Jan_23")
+        found_files = os.listdir(path + "\data\{}".format(folder_name))
         assert len(found_files) > 0, "No files found"
 
         core_file = find_file_path("tull",file_name,found_files)
 
         print(core_file)
-        
-        df = run_scripts("data/Jan_23/" + core_file)
+        data_path = path + "\data\{}\\".format(folder_name) + core_file
+        df = run_scripts(data_path)
         if file_name == "Battery":
             file_sub = "Systems"
         else:
@@ -960,7 +1002,7 @@ def main_2():
         df.loc[:,"Varukod"] = [x.replace(" ","") for x in df.Varukod]
 
         emma_file = find_file_path("emma",file_name,found_files)
-        emma_df = pd.read_excel("data/Jan_23/" + emma_file,header = 1)
+        emma_df = pd.read_excel("data/{}/".format(folder_name) + emma_file,header = header_row)
         emma_df = emma_df.loc[:,["Tollnummer","Landkode","Levvilk.","Varebeskrivelse","Tariffnr."]]
         emma_df = emma_df.rename(columns = {"Tollnummer":"Tull-id","Tariffnr.":"Varukod","Landkode":"Avsändarland",
         "Levvilk.":"Incoterms",
