@@ -10,6 +10,8 @@ import pickle
 from datetime import datetime,timedelta
 import os
 import math
+from argparse import ArgumentParser
+from get_tariff_data import get_tariff
 
 """
 TODO:
@@ -813,7 +815,7 @@ def fix_po_number(x,entity):
             
 
 
-def run_scripts(filename,atm_access = False):
+def run_scripts(filename,duties_file,atm_access = False):
 
     db = DB_connect()
     db.check_database()
@@ -830,7 +832,7 @@ def run_scripts(filename,atm_access = False):
 
 
 
-    df = import_file("data/duties2022.xlsx","xlsx")
+    df = duties_file
 
     country_groups = import_file("data/geographical_areas.xlsx","xlsx")
 
@@ -919,6 +921,7 @@ def run_scripts(filename,atm_access = False):
         ats_index = test_file.columns.get_loc("Autonom suspension tullsats")
         avsandar_index = test_file.columns.get_loc("Avsändare")
         ursprung_index = test_file.columns.get_loc("Ursprungsland")
+        date_index = test_file.columns.get_loc("Tx dag")
 
 
         val = int(test_file.iloc[row,j])
@@ -958,7 +961,8 @@ def run_scripts(filename,atm_access = False):
         if test_easpring(test_file.iloc[row,avsandar_index]):
             if test_file.iloc[row,ursprung_index] == "CN":
                 if test_file.iloc[row,forfar_index] == "4000":
-                    test_file.iloc[row,tull_index] = None
+                    if test_file.iloc[row,date_index] >= datetime.strptime("2022-01-01","%Y-%m-%d"):
+                        test_file.iloc[row,tull_index] = None
 
         
 
@@ -1008,28 +1012,63 @@ def same_country(row):
     else:
         return None
 
-def find_file_path(file_type,entity,files):
+def find_file_path(file_type,entity,files,append_month = None):
     assert file_type in ["emma","tull"],"No"
 
     if file_type == "emma":
         for f in files:
             if "Detaljer" in f.split(" "):
-                if entity.lower() in f.split(" ")[4].lower():   
-                    return f
+                if entity.lower() in f.split(" ")[4].lower():
+                    if append_month == None:   
+                        return f
+                    else:
+                        return append_month + "\\" + f
 
     if file_type == "tull":
         for f in files:
             if "statistik" in f.split("_"):
 
                 if entity.lower() in f.split("_")[-1].lower():
-                    return f
+                    if append_month == None:   
+                        return f
+                    else:
+                        return append_month + "\\" + f
+
+
+parser = ArgumentParser()
+parser.add_argument("-y","--year",default = datetime.now().year)
+parser.add_argument("-m","--month",default = datetime.now().month)
+parser.add_argument("-f","--fullyear",default = "N")
+
+month_map = {
+    "1":"january",
+    "2":"february",
+    "3":"march",
+    "4":"april",
+    "5":"may",
+    "6":"june",
+    "7":"july",
+    "8":"august",
+    "9":"september",
+    "10":"october",
+    "11":"november",
+    "12":"december"
+}
 
 def main_2():
+
+    args = parser.parse_args()
+    year = str(args.year)
+    month_ = str(args.month)
+    if str(args.fullyear) == "N":
+        full_year = False
+    else:
+        full_year = True
     #month = "full_year"
     #folder_name = "Year_22"
     
-    month = "2022"
-    folder_name = "2022"
+    month = year
+    folder_name = year
     #header_row = 0
     header_row = 1
     columns = ["Entity","Tull-id","Tx dag","Varupost antal","Deklarationssätt","Deklarationstyp","Transportsätt vid gräns",
@@ -1050,25 +1089,46 @@ def main_2():
     "ETT",
     "LABS",
     "Battery",
-    "Revolt"]
+    "Revolt"
+    ]
 
 
     dfs = []
 
     emma_dfs = []
+    path = os.getcwd()
+    file_path_tariff = path + "\data\\tariff_download_{}_{}.xlsx".format(year,month_map[month_])
+    try:
+        duties_file = pd.read_excel(file_path_tariff)
+    except:
+        today = datetime.now()
+        get_tariff(today,year,month_)
+        duties_file = pd.read_excel(file_path_tariff)
+    print(duties_file)
 
-    
-
+    append_month = None
     for file_name in files_subs:
         path = os.getcwd()
         found_files = os.listdir(path + "\data\{}".format(folder_name))
+        if month_map[month_]  in found_files and (full_year == False):
+            found_files = os.listdir(path + "\data\{}\{}".format(folder_name,month_map[month_]))
+            append_month = month_map[month_]
+        else:
+            found_files = os.listdir(path + "\data\{}".format(folder_name))
+
+        print(found_files)
+
         assert len(found_files) > 0, "No files found"
 
-        core_file = find_file_path("tull",file_name,found_files)
+        core_file = find_file_path("tull",file_name,found_files,append_month)
+
+
+
+        
 
         print(core_file)
         data_path = path + "\data\{}\\".format(folder_name) + core_file
-        df = run_scripts(data_path)
+        df = run_scripts(data_path,duties_file = duties_file)
         if file_name == "Battery":
             file_sub = "Systems"
         else:
@@ -1076,7 +1136,7 @@ def main_2():
         df.loc[:,"Entity"] ="Northvolt " + file_sub
         df.loc[:,"Varukod"] = [x.replace(" ","") for x in df.Varukod]
 
-        emma_file = find_file_path("emma",file_name,found_files)
+        emma_file = find_file_path("emma",file_name,found_files,append_month)
         emma_df = pd.read_excel("data/{}/".format(folder_name) + emma_file,header = header_row)
         emma_df = emma_df.loc[:,["Tollnummer","Landkode","Levvilk.","Varebeskrivelse","Tariffnr.","Referanse"]]
         emma_df = emma_df.rename(columns = {"Tollnummer":"Tull-id","Tariffnr.":"Varukod","Landkode":"Avsändarland",
@@ -1150,7 +1210,10 @@ def main_2():
     except:
         pass
     
-    final_result.to_excel("data/Results/{}/test_export_final_{}.xlsx".format(folder_name,month))
+    if full_year:
+        final_result.to_excel("data/Results/{}/test_export_final_{}.xlsx".format(folder_name,month))
+    else:
+        final_result.to_excel("data/Results/{}/test_export_final_{}_{}.xlsx".format(folder_name,month,month_map[month_]))
 
     
 
@@ -1165,7 +1228,13 @@ def main_2():
 
     potential_savings.loc[:,"Samma land"] = same_country_list
 
-    potential_savings.to_excel("data/Results/{}/potential_savings_{}.xlsx".format(folder_name,month))
+    if full_year:
+
+        potential_savings.to_excel("data/Results/{}/potential_savings_{}.xlsx".format(folder_name,month))
+
+    else:
+        potential_savings.to_excel("data/Results/{}/potential_savings_{}_{}.xlsx".format(folder_name,month,month_map[month_]))
+
 
 
     emmadf = pd.concat(emma_dfs)
